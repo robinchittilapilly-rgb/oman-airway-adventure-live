@@ -9,8 +9,8 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
-const isStaticDeploy = process.env.GITHUB_PAGES === "true";
-const basePath = process.env.VITE_BASE_PATH || "/";
+const isStaticDeploy = process.env["GITHUB_PAGES"] === "true";
+const basePath = process.env["VITE_BASE_PATH"] || "/";
 
 export default defineConfig({
   vite: {

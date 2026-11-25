@@ -35,12 +35,16 @@ export interface Airport {
   region: "Oman" | "GCC & MENA" | "Europe" | "Asia" | "Africa";
   cityGroup?: string;
   nearbyCodes?: string[];
+  /** Nearby/partner airport routed via a primary hub */
+  viaHubAirport?: string;
 }
 
 export const AIRPORTS: Airport[] = [
   { code: "MCT", city: "Muscat", cityAr: "مسقط", country: "Oman", name: "Muscat International Airport", region: "Oman" },
   { code: "SLL", city: "Salalah", cityAr: "صلالة", country: "Oman", name: "Salalah International Airport", region: "Oman" },
-  { code: "DXB", city: "Dubai", cityAr: "دبي", country: "UAE", name: "Dubai International Airport", region: "GCC & MENA", nearbyCodes: ["AUH", "SHJ"] },
+  { code: "DXB", city: "Dubai", cityAr: "دبي", country: "UAE", name: "Dubai International Airport", region: "GCC & MENA", cityGroup: "DXB", nearbyCodes: ["AUH", "SHJ"] },
+  { code: "AUH", city: "Abu Dhabi (Nearby UAE)", cityAr: "أبوظبي (مطار قريب)", country: "UAE", name: "Zayed International Airport", region: "GCC & MENA", cityGroup: "DXB", nearbyCodes: ["DXB", "SHJ"], viaHubAirport: "DXB" },
+  { code: "SHJ", city: "Sharjah (Nearby UAE)", cityAr: "الشارقة (مطار قريب)", country: "UAE", name: "Sharjah International Airport", region: "GCC & MENA", cityGroup: "DXB", nearbyCodes: ["DXB", "AUH"], viaHubAirport: "DXB" },
   { code: "DOH", city: "Doha", cityAr: "الدوحة", country: "Qatar", name: "Hamad International Airport", region: "GCC & MENA" },
   { code: "RUH", city: "Riyadh", cityAr: "الرياض", country: "Saudi Arabia", name: "King Khalid International Airport", region: "GCC & MENA" },
   { code: "JED", city: "Jeddah", cityAr: "جدة", country: "Saudi Arabia", name: "King Abdulaziz International Airport", region: "GCC & MENA" },
@@ -48,9 +52,12 @@ export const AIRPORTS: Airport[] = [
   { code: "KWI", city: "Kuwait", cityAr: "الكويت", country: "Kuwait", name: "Kuwait International Airport", region: "GCC & MENA" },
   { code: "CAI", city: "Cairo", cityAr: "القاهرة", country: "Egypt", name: "Cairo International Airport", region: "GCC & MENA" },
   { code: "IST", city: "Istanbul", cityAr: "إسطنبول", country: "Türkiye", name: "Istanbul Airport", region: "Europe" },
-  { code: "LHR", city: "London", cityAr: "لندن", country: "United Kingdom", name: "London Heathrow Airport", region: "Europe", cityGroup: "LON", nearbyCodes: ["LGW", "STN"] },
+  { code: "LHR", city: "London Heathrow", cityAr: "لندن هيثرو", country: "United Kingdom", name: "London Heathrow Airport", region: "Europe", cityGroup: "LON", nearbyCodes: ["LGW", "STN"] },
+  { code: "LGW", city: "London Gatwick (Nearby)", cityAr: "لندن غاتويك (قريب)", country: "United Kingdom", name: "London Gatwick Airport", region: "Europe", cityGroup: "LON", nearbyCodes: ["LHR", "STN"], viaHubAirport: "LHR" },
+  { code: "STN", city: "London Stansted (Nearby)", cityAr: "لندن ستانستيد (قريب)", country: "United Kingdom", name: "London Stansted Airport", region: "Europe", cityGroup: "LON", nearbyCodes: ["LHR", "LGW"], viaHubAirport: "LHR" },
   { code: "FRA", city: "Frankfurt", cityAr: "فرانكفورت", country: "Germany", name: "Frankfurt Airport", region: "Europe" },
-  { code: "CDG", city: "Paris", cityAr: "باريس", country: "France", name: "Paris Charles de Gaulle", region: "Europe", cityGroup: "PAR", nearbyCodes: ["ORY"] },
+  { code: "CDG", city: "Paris CDG", cityAr: "باريس شارل ديغول", country: "France", name: "Paris Charles de Gaulle", region: "Europe", cityGroup: "PAR", nearbyCodes: ["ORY"] },
+  { code: "ORY", city: "Paris Orly (Nearby)", cityAr: "باريس أورلي (قريب)", country: "France", name: "Paris Orly Airport", region: "Europe", cityGroup: "PAR", nearbyCodes: ["CDG"], viaHubAirport: "CDG" },
   { code: "AMS", city: "Amsterdam", cityAr: "أمستردام", country: "Netherlands", name: "Amsterdam Schiphol", region: "Europe" },
   { code: "MXP", city: "Milan", cityAr: "ميلانو", country: "Italy", name: "Milan Malpensa Airport", region: "Europe", cityGroup: "MIL" },
   { code: "BKK", city: "Bangkok", cityAr: "بانكوك", country: "Thailand", name: "Suvarnabhumi Airport", region: "Asia" },
@@ -67,6 +74,7 @@ export interface FareBrandSpec {
   name: string;
   nameAr: string;
   tagline: string;
+  taglineAr: string;
   multiplier: number;
   checkedBagKg: number;
   cabinBagText: string;
@@ -85,6 +93,7 @@ export const FARE_BRANDS: Record<FareBrandId, FareBrandSpec> = {
     name: "Economy Super Saver",
     nameAr: "السياحية التوفيرية",
     tagline: "Travel light with our sharpest fare",
+    taglineAr: "سفر خفيف بأفضل سعر اقتصادي",
     multiplier: 1.0,
     checkedBagKg: 0,
     cabinBagText: "1 × 7 kg",
@@ -101,6 +110,7 @@ export const FARE_BRANDS: Record<FareBrandId, FareBrandSpec> = {
     name: "Economy Comfort",
     nameAr: "السياحية المريحة",
     tagline: "20 kg baggage & flexible rebooking",
+    taglineAr: "20 كجم أمتعة ومرونة في التعديل",
     multiplier: 1.22,
     checkedBagKg: 20,
     cabinBagText: "1 × 7 kg",
@@ -117,6 +127,7 @@ export const FARE_BRANDS: Record<FareBrandId, FareBrandSpec> = {
     name: "Economy Flex",
     nameAr: "السياحية المرنة",
     tagline: "30 kg baggage, free seat & easy changes",
+    taglineAr: "30 كجم أمتعة ومقعد مجاني وتعديلات ميسرة",
     multiplier: 1.46,
     checkedBagKg: 30,
     cabinBagText: "1 × 7 kg",
@@ -133,6 +144,7 @@ export const FARE_BRANDS: Record<FareBrandId, FareBrandSpec> = {
     name: "Business Comfort",
     nameAr: "الأعمال المريحة",
     tagline: "Lie-flat Apex Suite, 40 kg & Majan Lounge",
+    taglineAr: "أجنحة مسطحة بالكامل، 40 كجم وصالة مجان",
     multiplier: 2.9,
     checkedBagKg: 40,
     cabinBagText: "2 × 7 kg",
@@ -149,6 +161,7 @@ export const FARE_BRANDS: Record<FareBrandId, FareBrandSpec> = {
     name: "Business Flex",
     nameAr: "الأعمال المرنة",
     tagline: "50 kg baggage, full flexibility & Studio upgrade eligible",
+    taglineAr: "50 كجم أمتعة، مرونة كاملة وقابلة للترقية للأستوديو",
     multiplier: 3.45,
     checkedBagKg: 50,
     cabinBagText: "2 × 7 kg",
@@ -165,6 +178,7 @@ export const FARE_BRANDS: Record<FareBrandId, FareBrandSpec> = {
     name: "Business Studio",
     nameAr: "أستوديو الأعمال",
     tagline: "Private enclosed suite, 60 kg & bespoke Omani dining",
+    taglineAr: "جناح خاص مغلق، 60 كجم وضيافة عُمانية فاخرة",
     multiplier: 4.85,
     checkedBagKg: 60,
     cabinBagText: "2 × 7 kg",
@@ -244,8 +258,7 @@ export function getDateISO(offsetFromToday: number): string {
 }
 
 /**
- * Generates the 30-day historical/rolling fare repository for any of the 20 Oman Air routes.
- * Deterministic per route + date so Low Fare Calendar & Search Results always match.
+ * Generates the 30-day rolling synthetic fare repository for any of the 20 Oman Air routes.
  */
 export function get30DayFareRepository(routeId: string): DailyFarePoint[] {
   const route = OMAN_AIR_20_ROUTES.find((r) => r.id === routeId) ?? OMAN_AIR_20_ROUTES[0]!;
@@ -260,7 +273,7 @@ export function get30DayFareRepository(routeId: string): DailyFarePoint[] {
     const weekendBump = isWeekend ? 1.12 : 1.0;
     const demandMult = wave * weekendBump;
     const seatsRemaining = Math.floor(seededFactor(routeHash + i * 31) * 14);
-    const soldOut = i === 6 && route.destination === "LHR"; // Deterministic sold-out date to demo FR-67 recovery
+    const soldOut = i === 6 && route.destination === "LHR";
 
     const pricesOMR = {} as Record<FareBrandId, number>;
     (Object.keys(FARE_BRANDS) as FareBrandId[]).forEach((brandId) => {
@@ -293,27 +306,192 @@ export function resolveCityOrAirport(query: string): Airport[] {
   );
 }
 
+function resolveHubAirportCode(code: string): string {
+  const ap = AIRPORTS.find((a) => a.code === code);
+  return ap?.viaHubAirport ?? code;
+}
+
 export function findRouteForPair(origin: string, destination: string): {
   route: OmanAirRouteDef;
   isReverse: boolean;
   isConnectingViaMCT: boolean;
+  resolvedOrigin: string;
+  resolvedDestination: string;
+  usesNearbyPartner: boolean;
 } | null {
+  const effOrigin = resolveHubAirportCode(origin);
+  const effDest = resolveHubAirportCode(destination);
+  const usesNearbyPartner = effOrigin !== origin || effDest !== destination;
+
   const direct = OMAN_AIR_20_ROUTES.find(
-    (r) => r.origin === origin && r.destination === destination
+    (r) => r.origin === effOrigin && r.destination === effDest
   );
-  if (direct) return { route: direct, isReverse: false, isConnectingViaMCT: false };
+  if (direct) {
+    return {
+      route: direct,
+      isReverse: false,
+      isConnectingViaMCT: usesNearbyPartner,
+      resolvedOrigin: effOrigin,
+      resolvedDestination: effDest,
+      usesNearbyPartner,
+    };
+  }
 
   const reverse = OMAN_AIR_20_ROUTES.find(
-    (r) => r.origin === destination && r.destination === origin
+    (r) => r.origin === effDest && r.destination === effOrigin
   );
-  if (reverse) return { route: reverse, isReverse: true, isConnectingViaMCT: false };
+  if (reverse) {
+    return {
+      route: reverse,
+      isReverse: true,
+      isConnectingViaMCT: usesNearbyPartner,
+      resolvedOrigin: effOrigin,
+      resolvedDestination: effDest,
+      usesNearbyPartner,
+    };
+  }
 
-  // Allow connecting itineraries via Muscat hub (MCT) between any two Oman Air destinations
-  const leg2 = OMAN_AIR_20_ROUTES.find((r) => r.destination === destination);
-  if (leg2 && origin !== destination) {
-    return { route: leg2, isReverse: false, isConnectingViaMCT: true };
+  const leg2 = OMAN_AIR_20_ROUTES.find((r) => r.destination === effDest);
+  if (leg2 && effOrigin !== effDest) {
+    return {
+      route: leg2,
+      isReverse: false,
+      isConnectingViaMCT: true,
+      resolvedOrigin: effOrigin,
+      resolvedDestination: effDest,
+      usesNearbyPartner,
+    };
   }
   return null;
+}
+
+export interface FlightOption {
+  id: string;
+  flightNumber: string;
+  origin: string;
+  destination: string;
+  departureTime: string;
+  arrivalTime: string;
+  durationMinutes: number;
+  stops: 0 | 1;
+  stopLabel: string;
+  aircraft: "Boeing 787-9 Dreamliner" | "Boeing 737 MAX 8";
+  hasStudio: boolean;
+  priceMultiplier: number;
+  seatsRemaining: number;
+  codesharePartner?: string | undefined;
+}
+
+function shiftHHMM(hhmm: string, deltaMinutes: number): string {
+  const clean = hhmm.replace("+1", "");
+  const [hStr, mStr] = clean.split(":");
+  const total = ((Number(hStr) || 0) * 60 + (Number(mStr) || 0) + deltaMinutes + 1440) % 1440;
+  const hh = String(Math.floor(total / 60)).padStart(2, "0");
+  const mm = String(total % 60).padStart(2, "0");
+  return hhmm.includes("+1") ? `${hh}:${mm}+1` : `${hh}:${mm}`;
+}
+
+/**
+ * Generates multiple selectable flight frequencies & connecting options so Filters (non-stop)
+ * and Sort (lowest price / shortest duration) operate on real result choices (FR-53..FR-56).
+ */
+export function generateFlightOptions(origin: string, destination: string, dateISO: string): FlightOption[] {
+  const match = findRouteForPair(origin, destination);
+  if (!match) return [];
+  const repo = get30DayFareRepository(match.route.id);
+  const day = repo.find((d) => d.dateISO === dateISO) ?? repo[0]!;
+  const baseDep = match.isReverse ? match.route.returnDepartureTime : match.route.departureTime;
+  const baseArr = match.isReverse ? match.route.returnArrivalTime : match.route.arrivalTime;
+  const baseNum = match.isReverse ? match.route.returnFlightNumber : match.route.flightNumber;
+  const numDigits = Number(baseNum.replace(/\D/g, "")) || 100;
+
+  if (match.isConnectingViaMCT) {
+    return [
+      {
+        id: `${baseNum}-CON1`,
+        flightNumber: `${baseNum}`,
+        origin,
+        destination,
+        departureTime: baseDep,
+        arrivalTime: shiftHHMM(baseArr, 105),
+        durationMinutes: match.route.durationMinutes + 105,
+        stops: 1,
+        stopLabel: match.usesNearbyPartner ? `1 Stop (via ${match.resolvedDestination})` : "1 Stop via Muscat (MCT)",
+        aircraft: match.route.aircraft,
+        hasStudio: match.route.hasStudio,
+        priceMultiplier: 1.0,
+        seatsRemaining: day.seatsRemaining,
+        codesharePartner: match.route.codesharePartner ?? (match.usesNearbyPartner ? "oneworld / Interline Rail-Air" : undefined),
+      },
+      {
+        id: `${baseNum}-CON2`,
+        flightNumber: `WY ${numDigits + 4}`,
+        origin,
+        destination,
+        departureTime: shiftHHMM(baseDep, 210),
+        arrivalTime: shiftHHMM(baseArr, 285),
+        durationMinutes: match.route.durationMinutes + 75,
+        stops: 1,
+        stopLabel: "1 Stop via Muscat (MCT) · Fast Connect",
+        aircraft: match.route.aircraft,
+        hasStudio: match.route.hasStudio,
+        priceMultiplier: 1.08,
+        seatsRemaining: Math.max(2, day.seatsRemaining - 1),
+        codesharePartner: match.route.codesharePartner,
+      },
+    ];
+  }
+
+  return [
+    {
+      id: `${baseNum}-NS1`,
+      flightNumber: baseNum,
+      origin,
+      destination,
+      departureTime: baseDep,
+      arrivalTime: baseArr,
+      durationMinutes: match.route.durationMinutes,
+      stops: 0,
+      stopLabel: "Non-stop",
+      aircraft: match.route.aircraft,
+      hasStudio: match.route.hasStudio,
+      priceMultiplier: 1.0,
+      seatsRemaining: day.seatsRemaining,
+      codesharePartner: match.route.codesharePartner,
+    },
+    {
+      id: `${baseNum}-NS2`,
+      flightNumber: `WY ${numDigits + 2}`,
+      origin,
+      destination,
+      departureTime: shiftHHMM(baseDep, 240),
+      arrivalTime: shiftHHMM(baseArr, 240),
+      durationMinutes: match.route.durationMinutes + 10,
+      stops: 0,
+      stopLabel: "Non-stop",
+      aircraft: match.route.aircraft,
+      hasStudio: match.route.hasStudio,
+      priceMultiplier: 0.94,
+      seatsRemaining: Math.max(3, day.seatsRemaining + 2),
+      codesharePartner: match.route.codesharePartner,
+    },
+    {
+      id: `${baseNum}-1S`,
+      flightNumber: `WY ${numDigits + 6}`,
+      origin,
+      destination,
+      departureTime: shiftHHMM(baseDep, -150),
+      arrivalTime: shiftHHMM(baseArr, 35),
+      durationMinutes: match.route.durationMinutes + 125,
+      stops: 1,
+      stopLabel: "1 Stop via Doha (DOH)",
+      aircraft: "Boeing 737 MAX 8",
+      hasStudio: false,
+      priceMultiplier: 0.89,
+      seatsRemaining: 8,
+      codesharePartner: "oneworld Partner",
+    },
+  ];
 }
 
 export function formatMoney(amountOMR: number, currency: CurrencyCode): string {

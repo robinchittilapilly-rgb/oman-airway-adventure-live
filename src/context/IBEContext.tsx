@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { CurrencyCode } from "../data/omanAirRoutes";
 import { INITIAL_SAMPLE_PNRS, type SavedBookingPNR, type SindbadTier } from "../data/ancillariesAndSeats";
+import { isHoldExpired } from "../lib/ibe-rules";
 
 export type AppLang = "en" | "ar";
 
@@ -26,6 +27,7 @@ interface IBEPersistedState {
   lang: AppLang;
   currency: CurrencyCode;
   sindbadSignedIn: boolean;
+  sindbadMemberName: string;
   sindbadTier: SindbadTier;
   sindbadMiles: number;
   tierPoints: number;
@@ -37,12 +39,13 @@ interface IBEPersistedState {
   claimedPnrs: string[];
 }
 
-const STORAGE_KEY = "oman_air_ibe_state_v1";
+const STORAGE_KEY = "oman_air_ibe_state_v2";
 
 const DEFAULT_STATE: IBEPersistedState = {
   lang: "en",
   currency: "OMR",
   sindbadSignedIn: true,
+  sindbadMemberName: "Tariq Al-Balushi",
   sindbadTier: "Gold",
   sindbadMiles: 68450,
   tierPoints: 420,
@@ -64,6 +67,8 @@ interface IBEContextValue extends IBEPersistedState {
   setLang: (lang: AppLang) => void;
   setCurrency: (currency: CurrencyCode) => void;
   setSindbadTier: (tier: SindbadTier) => void;
+  signInSindbad: (name?: string) => void;
+  signOutSindbad: () => void;
   toggleSindbadSignIn: () => void;
   setDarkSiteMode: (enabled: boolean) => void;
   addRecentSearch: (s: Omit<RecentSearch, "id">) => void;
@@ -79,6 +84,14 @@ interface IBEContextValue extends IBEPersistedState {
 
 const IBEContext = createContext<IBEContextValue | null>(null);
 
+function enforceHoldExpiries(bookings: SavedBookingPNR[]): SavedBookingPNR[] {
+  return bookings.map((b) =>
+    b.status === "HELD" && isHoldExpired(b.holdExpiresAt)
+      ? { ...b, status: "EXPIRED" }
+      : b
+  );
+}
+
 export function IBEProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<IBEPersistedState>(DEFAULT_STATE);
   const [hydrated, setHydrated] = useState(false);
@@ -88,7 +101,11 @@ export function IBEProvider({ children }: { children: ReactNode }) {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<IBEPersistedState>;
-        setState((prev) => ({ ...prev, ...parsed }));
+        setState((prev) => ({
+          ...prev,
+          ...parsed,
+          bookings: enforceHoldExpiries(parsed.bookings ?? prev.bookings),
+        }));
       }
     } catch {
       // ignore storage errors
@@ -115,6 +132,13 @@ export function IBEProvider({ children }: { children: ReactNode }) {
     setLang: (lang) => setState((s) => ({ ...s, lang })),
     setCurrency: (currency) => setState((s) => ({ ...s, currency })),
     setSindbadTier: (sindbadTier) => setState((s) => ({ ...s, sindbadTier, sindbadSignedIn: true })),
+    signInSindbad: (name) =>
+      setState((s) => ({
+        ...s,
+        sindbadSignedIn: true,
+        sindbadMemberName: name?.trim() || s.sindbadMemberName || "Tariq Al-Balushi",
+      })),
+    signOutSindbad: () => setState((s) => ({ ...s, sindbadSignedIn: false })),
     toggleSindbadSignIn: () => setState((s) => ({ ...s, sindbadSignedIn: !s.sindbadSignedIn })),
     setDarkSiteMode: (darkSiteMode) => setState((s) => ({ ...s, darkSiteMode })),
     addRecentSearch: (search) =>

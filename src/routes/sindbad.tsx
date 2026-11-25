@@ -1,19 +1,24 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Award, Calculator, Gift, Plus, Sparkles, Trash2, Users } from "lucide-react";
+import { Award, Calculator, Gift, LogIn, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useIBE } from "../context/IBEContext";
-import { REDEMPTION_CATALOG, type SindbadTier } from "../data/ancillariesAndSeats";
+import {
+  REDEMPTION_CATALOG,
+  RETRO_CLAIMABLE_PNRS,
+  type SindbadTier,
+} from "../data/ancillariesAndSeats";
 import { calculateSindbadMiles } from "../lib/ibe-rules";
+import { t } from "../lib/i18n";
 import { Button } from "../components/ui/button";
 
 export const Route = createFileRoute("/sindbad")({
   head: () => ({
     meta: [
       { title: "Sindbad Frequent Flyer Portal | Oman Air" },
-      { name: "description", content: "Track Sindbad tier status, calculate spend-based miles, pool family miles, retro-claim missing flights, and redeem rewards." },
+      { name: "description", content: "Track Sindbad tier status, calculate spend-based miles, pool family miles, retro-claim eligible flights, and redeem rewards." },
       { property: "og:title", content: "Sindbad Loyalty Portal | Oman Air" },
-      { property: "og:description", content: "Oman Air Sindbad frequent flyer dashboard, household pooling, and redemption catalog." },
+      { property: "og:description", content: "Oman Air Sindbad frequent flyer dashboard prototype, household pooling, and redemption catalog." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -23,6 +28,10 @@ export const Route = createFileRoute("/sindbad")({
 
 function SindbadPortalPage() {
   const {
+    sindbadSignedIn,
+    sindbadMemberName,
+    signInSindbad,
+    signOutSindbad,
     sindbadTier,
     setSindbadTier,
     sindbadMiles,
@@ -33,12 +42,16 @@ function SindbadPortalPage() {
     addHouseholdMember,
     removeHouseholdMember,
     claimedPnrs,
+    bookings,
+    lang,
   } = useIBE();
+  const copy = t(lang).sindbad;
 
   const [calcOMR, setCalcOMR] = useState("250");
   const [retroPnr, setRetroPnr] = useState("");
   const [memberName, setMemberName] = useState("");
   const [memberRel, setMemberRel] = useState("Sibling");
+  const [enrollName, setEnrollName] = useState("Tariq Al-Balushi");
 
   const pooledTotal = sindbadMiles + household.reduce((s, h) => s + h.contributedMiles, 0);
   const tierTarget = sindbadTier === "Gold" ? 600 : sindbadTier === "Silver" ? 300 : 150;
@@ -55,9 +68,18 @@ function SindbadPortalPage() {
       toast.error(`PNR ${clean} has already been credited to your Sindbad account.`);
       return;
     }
-    addMiles(2400, clean);
+    const ledgerMatch = RETRO_CLAIMABLE_PNRS[clean];
+    const bookingMatch = bookings.find((b) => b.rloc === clean && b.status === "CONFIRMED");
+    if (!ledgerMatch && !bookingMatch) {
+      toast.error("PNR not found in demo LMS ledger. Try WY5M2K, WY3P8N, WY2J4Q, or a confirmed booking RLOC.");
+      return;
+    }
+    const milesToCredit = ledgerMatch
+      ? ledgerMatch.miles
+      : calculateSindbadMiles(bookingMatch!.totalPaidOMR, sindbadTier);
+    addMiles(milesToCredit, clean);
     setRetroPnr("");
-    toast.success(`PNR ${clean} validated via LMS! +2,400 Sindbad Miles credited.`);
+    toast.success(`Demo LMS match for ${clean}! +${milesToCredit.toLocaleString()} Sindbad Miles credited.`);
   };
 
   const handleRedeem = (title: string, miles: number) => {
@@ -65,7 +87,7 @@ function SindbadPortalPage() {
       toast.error("Insufficient Sindbad miles balance for this reward.");
       return;
     }
-    toast.success(`Redeemed "${title}" for ${miles.toLocaleString()} miles! Voucher sent.`);
+    toast.success(`Redeemed "${title}" for ${miles.toLocaleString()} miles (Demo Voucher)!`);
   };
 
   const handleAddFamily = (e: React.FormEvent) => {
@@ -78,47 +100,91 @@ function SindbadPortalPage() {
       contributedMiles: 1500,
     });
     setMemberName("");
-    toast.success("Family member linked to your Sindbad Household pool.");
+    toast.success("Family member linked to your Sindbad Household pool (Demo).");
   };
+
+  if (!sindbadSignedIn) {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-16 sm:px-6">
+        <div className="rounded-3xl border border-border bg-card p-8 text-center shadow-sm">
+          <Award className="mx-auto h-10 w-10 text-primary" />
+          <h1 className="mt-3 font-display text-2xl font-extrabold">Sign In or Enroll in Sindbad (Demo)</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            You are currently browsing as a Guest. Sign in to view your miles balance, household pool, and saved travelers.
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              signInSindbad(enrollName);
+              toast.success(`Signed in as ${enrollName} (Demo session)`);
+            }}
+            className="mt-6 space-y-3 text-start"
+          >
+            <div>
+              <label htmlFor="sindbad-enroll-name" className="mb-1 block text-xs font-semibold">
+                Member Full Name
+              </label>
+              <input
+                id="sindbad-enroll-name"
+                value={enrollName}
+                onChange={(e) => setEnrollName(e.target.value)}
+                className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm"
+              />
+            </div>
+            <Button type="submit" size="lg" className="w-full gap-2 rounded-xl font-display font-bold">
+              <LogIn className="h-4 w-4" /> Continue to Sindbad Portal (Demo)
+            </Button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 space-y-8">
-      {/* Loyalty Dashboard Hero Card (FR-18) */}
+      {/* Loyalty Dashboard Hero Card */}
       <section className="rounded-3xl bg-teal-deep p-6 text-teal-deep-foreground sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
             <p className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.2em] text-gold">
               <Award className="h-4 w-4" /> Sindbad Member · oneworld {sindbadTier === "Gold" ? "Sapphire" : sindbadTier === "Silver" ? "Ruby" : "Member"}
             </p>
-            <h1 className="mt-2 font-display text-3xl font-extrabold">Tariq Al-Balushi</h1>
-            <p className="text-xs opacity-80">Account SB-8841209 · SSO Synced across Web IBE & Mobile</p>
+            <h1 className="mt-2 font-display text-3xl font-extrabold">{sindbadMemberName}</h1>
+            <p className="text-xs opacity-85">Account SB-8841209 · Demo browser session ({copy.title})</p>
 
             <div className="mt-5 flex flex-wrap gap-2">
-              {(["Blue", "Silver", "Gold"] as SindbadTier[]).map((t) => (
+              {(["Blue", "Silver", "Gold"] as SindbadTier[]).map((tier) => (
                 <button
-                  key={t}
+                  key={tier}
                   type="button"
-                  onClick={() => setSindbadTier(t)}
+                  onClick={() => setSindbadTier(tier)}
                   className={`rounded-lg px-3.5 py-1.5 text-xs font-bold transition-colors ${
-                    sindbadTier === t ? "bg-gold text-gold-foreground" : "bg-teal-deep-foreground/10 hover:bg-teal-deep-foreground/20"
+                    sindbadTier === tier ? "bg-gold text-gold-foreground" : "bg-teal-deep-foreground/10 hover:bg-teal-deep-foreground/20"
                   }`}
                 >
-                  Preview {t} Tier
+                  Preview {tier} Tier
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={signOutSindbad}
+                className="rounded-lg border border-teal-deep-foreground/30 px-3.5 py-1.5 text-xs font-semibold hover:bg-teal-deep-foreground/10"
+              >
+                Sign out (Test Guest Flow)
+              </button>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4 sm:gap-6">
             <div className="rounded-2xl bg-teal-deep-foreground/10 p-4">
-              <p className="text-[11px] opacity-80">Personal Balance</p>
+              <p className="text-xs opacity-85">Personal Balance</p>
               <p className="font-display text-2xl font-extrabold text-gold">{sindbadMiles.toLocaleString()}</p>
-              <p className="text-[11px] opacity-75">Sindbad Miles</p>
+              <p className="text-xs opacity-80">Sindbad Miles</p>
             </div>
             <div className="rounded-2xl bg-teal-deep-foreground/10 p-4">
-              <p className="text-[11px] opacity-80">Household Pool</p>
+              <p className="text-xs opacity-85">Household Pool</p>
               <p className="font-display text-2xl font-extrabold">{pooledTotal.toLocaleString()}</p>
-              <p className="text-[11px] opacity-75">Combined Miles</p>
+              <p className="text-xs opacity-80">Combined Miles</p>
             </div>
           </div>
         </div>
@@ -135,17 +201,17 @@ function SindbadPortalPage() {
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Spend-Based Miles Calculator (FR-102) */}
         <section className="rounded-2xl border border-border bg-card p-6">
           <h2 className="flex items-center gap-2 font-display text-lg font-bold">
             <Calculator className="h-5 w-5 text-primary" /> Spend-Based Miles Calculator
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Official Oman Air rule: Blue earns 4×, Silver 5×, Gold 6× miles per USD spent on base fare & add-ons.
+            Blue earns 4×, Silver 5×, Gold 6× miles per USD equivalent spent on base fare & add-ons.
           </p>
           <div className="mt-4 flex items-center gap-3">
-            <label className="text-xs font-semibold">Eligible Spend (OMR):</label>
+            <label htmlFor="sindbad-calc-omr" className="text-xs font-semibold">Eligible Spend (OMR):</label>
             <input
+              id="sindbad-calc-omr"
               type="number"
               min={0}
               value={calcOMR}
@@ -154,42 +220,42 @@ function SindbadPortalPage() {
             />
           </div>
           <div className="mt-4 grid grid-cols-3 gap-2.5 text-center">
-            {(["Blue", "Silver", "Gold"] as SindbadTier[]).map((t) => (
-              <div key={t} className={`rounded-xl border p-3 ${sindbadTier === t ? "border-primary bg-primary/10" : "border-border"}`}>
-                <p className="text-xs font-semibold text-muted-foreground">{t}</p>
+            {(["Blue", "Silver", "Gold"] as SindbadTier[]).map((tier) => (
+              <div key={tier} className={`rounded-xl border p-3 ${sindbadTier === tier ? "border-primary bg-primary/10" : "border-border"}`}>
+                <p className="text-xs font-semibold text-muted-foreground">{tier}</p>
                 <p className="mt-1 font-display text-lg font-extrabold text-primary">
-                  +{calculateSindbadMiles(Math.max(0, Number(calcOMR) || 0), t).toLocaleString()}
+                  +{calculateSindbadMiles(Math.max(0, Number(calcOMR) || 0), tier).toLocaleString()}
                 </p>
               </div>
             ))}
           </div>
         </section>
 
-        {/* Retro-Claim Missing Miles (FR-20) */}
         <section className="rounded-2xl border border-border bg-card p-6">
           <h2 className="flex items-center gap-2 font-display text-lg font-bold">
-            <Sparkles className="h-5 w-5 text-primary" /> Claim Missing Miles (Retro-Claim)
+            <Sparkles className="h-5 w-5 text-primary" /> {copy.retroTitle}
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Enter any 6-character Oman Air PNR from the past 6 months for instant LMS validation.
+            Enter an unclaimed PNR from the demo ledger (<code>WY5M2K</code>, <code>WY3P8N</code>, <code>WY2J4Q</code>) or a confirmed booking RLOC.
           </p>
           <form onSubmit={handleRetroClaim} className="mt-4 flex gap-2">
+            <label htmlFor="sindbad-retro-pnr" className="sr-only">PNR Code</label>
             <input
+              id="sindbad-retro-pnr"
               value={retroPnr}
               onChange={(e) => setRetroPnr(e.target.value.toUpperCase())}
               placeholder="e.g. WY5M2K"
               maxLength={6}
               className="h-11 flex-1 rounded-xl border border-input bg-background px-3 text-sm font-bold uppercase"
             />
-            <Button type="submit" className="h-11 rounded-xl font-display font-bold">Validate & Claim</Button>
+            <Button type="submit" className="h-11 rounded-xl font-display font-bold">Check & Claim (Demo)</Button>
           </form>
         </section>
       </div>
 
-      {/* Family / Household Pooling (FR-21) */}
       <section className="rounded-2xl border border-border bg-card p-6">
         <h2 className="flex items-center gap-2 font-display text-lg font-bold">
-          <Users className="h-5 w-5 text-primary" /> Family & Household Miles Pooling
+          <Users className="h-5 w-5 text-primary" /> {copy.familyTitle}
         </h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           {household.map((h) => (
@@ -205,24 +271,36 @@ function SindbadPortalPage() {
           ))}
         </div>
         <form onSubmit={handleAddFamily} className="mt-4 flex flex-wrap gap-2">
-          <input value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="Add family member name" className="h-10 rounded-lg border border-input bg-background px-3 text-sm" />
-          <select value={memberRel} onChange={(e) => setMemberRel(e.target.value)} className="h-10 rounded-lg border border-input bg-background px-3 text-sm">
+          <label htmlFor="family-member-name" className="sr-only">Family member name</label>
+          <input
+            id="family-member-name"
+            value={memberName}
+            onChange={(e) => setMemberName(e.target.value)}
+            placeholder="Add family member name"
+            className="h-10 rounded-lg border border-input bg-background px-3 text-sm"
+          />
+          <label htmlFor="family-member-rel" className="sr-only">Relationship</label>
+          <select
+            id="family-member-rel"
+            value={memberRel}
+            onChange={(e) => setMemberRel(e.target.value)}
+            className="h-10 rounded-lg border border-input bg-background px-3 text-sm"
+          >
             <option>Spouse</option><option>Child</option><option>Parent</option><option>Sibling</option>
           </select>
-          <Button type="submit" variant="secondary" className="gap-1.5"><Plus className="h-4 w-4" /> Link Member</Button>
+          <Button type="submit" variant="secondary" className="gap-1.5"><Plus className="h-4 w-4" /> Link Member (Demo)</Button>
         </form>
       </section>
 
-      {/* Non-Flight Redemption Catalog (FR-22) */}
       <section className="rounded-2xl border border-border bg-card p-6">
         <h2 className="flex items-center gap-2 font-display text-lg font-bold">
-          <Gift className="h-5 w-5 text-primary" /> Non-Flight Partner Redemption Catalog
+          <Gift className="h-5 w-5 text-primary" /> {copy.catalogTitle}
         </h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {REDEMPTION_CATALOG.map((item) => (
             <div key={item.id} className="flex flex-col justify-between rounded-xl border border-border bg-background p-4">
               <div>
-                <span className="rounded bg-secondary px-2 py-0.5 text-[10px] font-bold">{item.category}</span>
+                <span className="rounded bg-secondary px-2 py-0.5 text-xs font-bold">{item.category}</span>
                 <h3 className="mt-2 font-display text-sm font-bold">{item.title}</h3>
                 <p className="mt-1 text-xs text-muted-foreground">{item.partner}</p>
               </div>

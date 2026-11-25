@@ -6,6 +6,13 @@ import { Button } from "../ui/button";
 
 export type PaymentMethodId = "card" | "lpm" | "wallet" | "bnpl" | "miles_cash";
 
+interface ItineraryReviewSummary {
+  segments: { label: string; flightNumber: string; dateISO: string; times: string }[];
+  passengers: { name: string; role: string; seat: string }[];
+  fareBrandName: string;
+  ancillaryNames: string[];
+}
+
 interface PaymentCheckoutStepProps {
   baseFareOMR: number;
   taxesOMR: number;
@@ -13,8 +20,10 @@ interface PaymentCheckoutStepProps {
   promoDiscountOMR: number;
   totalOMR: number;
   earnedMiles: number;
+  reviewSummary?: ItineraryReviewSummary;
   onConfirmPay: (details: {
     mode: "pay" | "hold";
+    holdHours?: 24 | 48;
     paymentLabel: string;
     milesUsed: number;
     travelBankUsedOMR: number;
@@ -22,10 +31,6 @@ interface PaymentCheckoutStepProps {
   }) => void;
 }
 
-/**
- * FR-74 (Hold My Fare), FR-80 (Review & Breakdown), FR-92..100 (Global Cards,
- * OmanNet/Mada/KNET LPM, Apple/Google Pay, Tabby/Tamara BNPL, Miles+Cash & Travel Bank mFOP).
- */
 export function PaymentCheckoutStep({
   baseFareOMR,
   taxesOMR,
@@ -33,9 +38,10 @@ export function PaymentCheckoutStep({
   promoDiscountOMR,
   totalOMR,
   earnedMiles,
+  reviewSummary,
   onConfirmPay,
 }: PaymentCheckoutStepProps) {
-  const { currency, sindbadMiles, travelBankOMR } = useIBE();
+  const { currency, sindbadMiles, sindbadSignedIn, travelBankOMR, lang } = useIBE();
   const [method, setMethod] = useState<PaymentMethodId>("card");
   const [lpmChoice, setLpmChoice] = useState<"OmanNet" | "Mada" | "KNET">("OmanNet");
   const [bnplChoice, setBnplChoice] = useState<"Tabby" | "Tamara" | "Tasheel">("Tabby");
@@ -43,9 +49,9 @@ export function PaymentCheckoutStep({
   const [useTravelBank, setUseTravelBank] = useState(false);
   const [holdMode, setHoldMode] = useState(false);
   const [holdHours, setHoldHours] = useState<24 | 48>(24);
-  const [cardLast4, setCardLast4] = useState("4821");
+  const [cardChoice, setCardChoice] = useState("Visa Infinite •••• 4821");
 
-  const maxMilesOMR = Math.min(totalOMR * 0.5, Math.floor(sindbadMiles / 400));
+  const maxMilesOMR = sindbadSignedIn ? Math.min(totalOMR * 0.5, Math.floor(sindbadMiles / 400)) : 0;
   const milesOffsetOMR = useMilesSplit || method === "miles_cash" ? maxMilesOMR : 0;
   const milesToBurn = Math.round(milesOffsetOMR * 400);
 
@@ -57,7 +63,8 @@ export function PaymentCheckoutStep({
     if (holdMode) {
       onConfirmPay({
         mode: "hold",
-        paymentLabel: `Hold My Fare (${holdHours}h Guarantee)`,
+        holdHours,
+        paymentLabel: `Hold My Fare (${holdHours}h Guarantee · Demo)`,
         milesUsed: 0,
         travelBankUsedOMR: 0,
         finalCashOMR,
@@ -66,14 +73,14 @@ export function PaymentCheckoutStep({
     }
     const label =
       method === "card"
-        ? `Visa / Mastercard •••• ${cardLast4} (3DS2 Verified)`
+        ? `${cardChoice} (Simulated Checkout)`
         : method === "lpm"
-          ? `${lpmChoice} Regional Debit`
+          ? `${lpmChoice} Regional Debit (Demo)`
           : method === "wallet"
-            ? "Apple Pay / Google Pay"
+            ? "Apple Pay / Google Pay (Demo)"
             : method === "bnpl"
-              ? `${bnplChoice} 4× Interest-Free Installments`
-              : `Sindbad Miles (${milesToBurn.toLocaleString()} mi) + Card`;
+              ? `${bnplChoice} 4× Installments (Demo)`
+              : `Sindbad Miles (${milesToBurn.toLocaleString()} mi) + Card (Demo)`;
 
     onConfirmPay({
       mode: "pay",
@@ -87,6 +94,38 @@ export function PaymentCheckoutStep({
   return (
     <div className="grid gap-6 lg:grid-cols-12">
       <div className="space-y-5 lg:col-span-7">
+        {/* Consolidated Review Summary (FR-80) */}
+        {reviewSummary && (
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <h3 className="font-display text-lg font-bold">
+              {lang === "ar" ? "مراجعة خط السير والمسافرين" : "Review Itinerary, Passengers & Add-Ons"}
+            </h3>
+            <div className="mt-3 space-y-2 text-xs">
+              {reviewSummary.segments.map((seg, i) => (
+                <div key={i} className="flex flex-wrap items-center justify-between rounded-xl bg-muted/45 px-3 py-2">
+                  <span className="font-bold">{seg.flightNumber} · {seg.label}</span>
+                  <span className="text-muted-foreground">{seg.dateISO} · {seg.times}</span>
+                </div>
+              ))}
+              <div className="pt-1">
+                <p className="font-semibold text-muted-foreground">Fare Brand: <span className="text-foreground">{reviewSummary.fareBrandName}</span></p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {reviewSummary.passengers.map((p, idx) => (
+                    <span key={idx} className="rounded-lg border border-border bg-background px-2.5 py-1 font-semibold">
+                      {p.name} ({p.role}) · Seat {p.seat}
+                    </span>
+                  ))}
+                </div>
+                {reviewSummary.ancillaryNames.length > 0 && (
+                  <p className="mt-2 text-muted-foreground">
+                    Add-ons: <span className="font-semibold text-foreground">{reviewSummary.ancillaryNames.join(", ")}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Hold My Fare toggle (FR-74) */}
         <div className="rounded-2xl border border-gold/50 bg-gold/10 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -94,11 +133,11 @@ export function PaymentCheckoutStep({
               <Clock className="h-4 w-4 text-primary" />
               <div>
                 <p className="font-display text-sm font-bold">Need Time to Think? Hold My Fare</p>
-                <p className="text-xs text-muted-foreground">Lock this exact PNR and guaranteed fare for 24 or 48 hours.</p>
+                <p className="text-xs text-muted-foreground">Lock this PNR and fare for 24 or 48 hours before ticketing.</p>
               </div>
             </div>
-            <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-bold">
-              <input type="checkbox" checked={holdMode} onChange={(e) => setHoldMode(e.target.checked)} />
+            <label htmlFor="hold-mode-toggle" className="inline-flex cursor-pointer items-center gap-2 text-xs font-bold">
+              <input id="hold-mode-toggle" type="checkbox" checked={holdMode} onChange={(e) => setHoldMode(e.target.checked)} />
               Hold instead of paying now
             </label>
           </div>
@@ -123,7 +162,9 @@ export function PaymentCheckoutStep({
         {/* Payment Methods */}
         {!holdMode && (
           <div className="rounded-2xl border border-border bg-card p-5">
-            <h3 className="font-display text-lg font-bold">Select Payment Method (PCI-DSS & 3DS2)</h3>
+            <h3 className="font-display text-lg font-bold">
+              {lang === "ar" ? "اختر طريقة الدفع (محاكاة تجريبية)" : "Select Payment Method (Simulated Checkout)"}
+            </h3>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
               {(
                 [
@@ -155,26 +196,31 @@ export function PaymentCheckoutStep({
               {method === "card" && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="sm:col-span-2">
-                    <label className="mb-1 block text-xs font-semibold">Saved Card (Tokenized) or New Card</label>
+                    <label htmlFor="payment-card-select" className="mb-1 block text-xs font-semibold">
+                      Demo Card Scheme (Visa, Mastercard, AMEX, Diners, JCB)
+                    </label>
                     <select
-                      value={cardLast4}
-                      onChange={(e) => setCardLast4(e.target.value)}
+                      id="payment-card-select"
+                      value={cardChoice}
+                      onChange={(e) => setCardChoice(e.target.value)}
                       className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
                     >
-                      <option value="4821">Visa Infinite •••• 4821 (Bank Muscat)</option>
-                      <option value="9102">Mastercard World •••• 9102 (Saved)</option>
-                      <option value="3004">AMEX Platinum •••• 3004 (Saved)</option>
+                      <option value="Visa Infinite •••• 4821">Visa Infinite •••• 4821 (Bank Muscat Demo)</option>
+                      <option value="Mastercard World •••• 9102">Mastercard World •••• 9102 (Demo)</option>
+                      <option value="AMEX Platinum •••• 3004">AMEX Platinum •••• 3004 (Demo)</option>
+                      <option value="Diners Club •••• 7710">Diners Club International •••• 7710 (Demo)</option>
+                      <option value="JCB Ultimate •••• 5529">JCB Ultimate •••• 5529 (Demo)</option>
                     </select>
                   </div>
                   <p className="text-xs text-muted-foreground sm:col-span-2">
-                    Simulated checkout · EMV 3-D Secure 2.0 & Accertify pre-auth risk scoring enabled.
+                    Simulated prototype checkout — no real card charge, 3DS2 challenge, or live gateway call is performed.
                   </p>
                 </div>
               )}
 
               {method === "lpm" && (
                 <div className="space-y-2">
-                  <p className="text-xs font-semibold">Regional GCC Payment Network</p>
+                  <p className="text-xs font-semibold">Regional GCC Payment Network (Demo)</p>
                   <div className="flex flex-wrap gap-2">
                     {(["OmanNet", "Mada", "KNET"] as const).map((net) => (
                       <button
@@ -194,7 +240,7 @@ export function PaymentCheckoutStep({
 
               {method === "wallet" && (
                 <p className="text-xs text-muted-foreground">
-                  One-touch biometric settlement via Apple Pay or Google Pay in {currency} with real-time MCP conversion.
+                  Demo Apple Pay / Google Pay preview in {currency} (no live OS wallet integration in this prototype).
                 </p>
               )}
 
@@ -215,30 +261,31 @@ export function PaymentCheckoutStep({
                     ))}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    4 interest-free monthly installments of <strong>{formatMoney(finalCashOMR / 4, currency)}</strong> via {bnplChoice}.
+                    Illustrative 4 installments of <strong>{formatMoney(finalCashOMR / 4, currency)}</strong> via {bnplChoice} (demo calculation).
                   </p>
                 </div>
               )}
 
               {method === "miles_cash" && (
                 <p className="text-xs text-muted-foreground">
-                  Multi-Form of Payment (mFOP): Burning <strong>{milesToBurn.toLocaleString()} Sindbad Miles</strong> (−{formatMoney(milesOffsetOMR, currency)}) + Card balance.
+                  {sindbadSignedIn
+                    ? `Multi-Form of Payment (mFOP): Burning ${milesToBurn.toLocaleString()} Sindbad Miles (−${formatMoney(milesOffsetOMR, currency)}) + Card balance.`
+                    : "Sign in to Sindbad to apply Miles + Cash split."}
                 </p>
               )}
             </div>
 
-            {/* mFOP Split toggles (FR-98, FR-118) */}
             <div className="mt-4 flex flex-col gap-2 text-xs">
-              {method !== "miles_cash" && (
-                <label className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+              {method !== "miles_cash" && sindbadSignedIn && (
+                <label htmlFor="miles-split-toggle" className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
                   <span>Apply Sindbad Miles split ({sindbadMiles.toLocaleString()} mi available)</span>
-                  <input type="checkbox" checked={useMilesSplit} onChange={(e) => setUseMilesSplit(e.target.checked)} />
+                  <input id="miles-split-toggle" type="checkbox" checked={useMilesSplit} onChange={(e) => setUseMilesSplit(e.target.checked)} />
                 </label>
               )}
               {travelBankOMR > 0 && (
-                <label className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+                <label htmlFor="travel-bank-toggle" className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
                   <span>Apply Oman Air Travel Bank Voucher ({formatMoney(travelBankOMR, currency)} credit)</span>
-                  <input type="checkbox" checked={useTravelBank} onChange={(e) => setUseTravelBank(e.target.checked)} />
+                  <input id="travel-bank-toggle" type="checkbox" checked={useTravelBank} onChange={(e) => setUseTravelBank(e.target.checked)} />
                 </label>
               )}
             </div>
@@ -291,17 +338,17 @@ export function PaymentCheckoutStep({
 
           <div className="mt-4 rounded-xl bg-secondary/60 p-3 text-xs font-medium text-secondary-foreground">
             <Sparkles className="me-1.5 inline h-3.5 w-3.5 text-primary" />
-            You will earn <strong>+{earnedMiles.toLocaleString()} Sindbad Miles</strong> on this itinerary.
+            You will earn <strong>+{earnedMiles.toLocaleString()} Sindbad Miles</strong> (demo calculation).
           </div>
 
           <Button type="button" size="lg" className="mt-5 h-12 w-full gap-2 rounded-xl font-display text-sm font-bold" onClick={handleComplete}>
             <Lock className="h-4 w-4" />
-            {holdMode ? `Hold Fare for ${holdHours}h (${formatMoney(finalCashOMR, currency)})` : `Pay & Issue Ticket (${formatMoney(finalCashOMR, currency)})`}
+            {holdMode ? `Hold Fare for ${holdHours}h (${formatMoney(finalCashOMR, currency)})` : `Complete Demo Booking (${formatMoney(finalCashOMR, currency)})`}
           </Button>
 
-          <p className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+          <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 text-success" />
-            Instant 6-character PNR & EMD fulfillment (Simulated PSS)
+            Simulated PNR generation in browser storage (Prototype)
           </p>
         </div>
       </div>

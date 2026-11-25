@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { IBEProvider, useIBE } from "../context/IBEContext";
 import { Navbar } from "../components/Navbar";
 import { DarkSiteView } from "../components/DarkSiteView";
+import { t } from "../lib/i18n";
 import { SuhailAssistant } from "../components/SuhailAssistant";
 import { Toaster } from "../components/ui/sonner";
 
@@ -126,7 +127,8 @@ function RootShell({ children }: { children: ReactNode }) {
 }
 
 function AppShell() {
-  const { darkSiteMode } = useIBE();
+  const { darkSiteMode, lang } = useIBE();
+  const copy = t(lang);
   if (darkSiteMode) {
     return <DarkSiteView />;
   }
@@ -139,10 +141,10 @@ function AppShell() {
       <footer className="border-t border-border bg-teal-deep text-teal-deep-foreground">
         <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-4 px-4 py-8 sm:flex-row sm:items-center sm:px-6 text-xs">
           <div>
-            <p className="font-display text-sm font-bold tracking-wider">OMAN AIR · الطيران العماني</p>
-            <p className="mt-1 opacity-75">Member of the oneworld Alliance · Hub: Muscat International Airport (MCT)</p>
+            <p className="font-display text-sm font-bold tracking-wider">{copy.brandFooterTitle}</p>
+            <p className="mt-1 opacity-80">{copy.brandFooterSub}</p>
           </div>
-          <p className="opacity-70">WCAG 2.2 AAA-Minded UI · Local 20-Route 30-Day Repository · Simulated PSS/Payment Gateway</p>
+          <p className="opacity-75">{copy.brandFooterNote}</p>
         </div>
       </footer>
       <SuhailAssistant />

@@ -2,14 +2,16 @@ import { useState } from "react";
 import { AlertTriangle, Phone, Plane, RotateCcw } from "lucide-react";
 import { useIBE } from "../context/IBEContext";
 import { OMAN_AIR_20_ROUTES } from "../data/omanAirRoutes";
+import { t } from "../lib/i18n";
+import { OmanAirLogo } from "./OmanAirLogo";
 
 /**
- * FR-31 & FR-32: Ultra-lightweight, zero-media high-availability Dark Site mode
- * for emergency operational disruptions.
+ * FR-31 & FR-32: Lightweight Dark Site mode template (demo).
  */
 export function DarkSiteView() {
-  const { setDarkSiteMode } = useIBE();
+  const { setDarkSiteMode, lang } = useIBE();
   const [flightQuery, setFlightQuery] = useState("WY 603");
+  const copy = t(lang).darkSite;
 
   const match = OMAN_AIR_20_ROUTES.find(
     (r) =>
@@ -21,11 +23,14 @@ export function DarkSiteView() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b-2 border-destructive bg-teal-deep text-teal-deep-foreground">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3 px-4 py-4">
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle className="h-5 w-5 text-gold" />
-            <div>
-              <p className="font-display text-lg font-bold tracking-wider">OMAN AIR · TRAVEL ADVISORY PORTAL</p>
-              <p className="text-xs opacity-80">Lightweight High-Availability Dark Site Mode (Zero Heavy Media)</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <OmanAirLogo inverted compact />
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-gold" />
+              <div>
+                <p className="font-display text-base font-bold tracking-wider">{copy.title}</p>
+                <p className="text-xs opacity-85">{copy.subtitle}</p>
+              </div>
             </div>
           </div>
           <button
@@ -34,29 +39,35 @@ export function DarkSiteView() {
             className="inline-flex items-center gap-1.5 rounded-md border border-teal-deep-foreground/30 px-3 py-1.5 text-xs font-semibold hover:bg-teal-deep-foreground/10"
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            Exit Dark Site
+            {copy.exit}
           </button>
         </div>
       </header>
 
       <main className="mx-auto max-w-4xl space-y-6 px-4 py-8">
         <section className="rounded-lg border border-destructive/40 bg-destructive/5 p-5">
-          <h1 className="font-display text-xl font-bold">Operational Update — Gulf Airspace Weather Advisory</h1>
+          <h1 className="font-display text-xl font-bold">{copy.advisoryHeading}</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Updated 16:00 UTC · Due to severe weather cells near Dubai (DXB), select regional departures including WY 603 are subject to schedule adjustments. All rebooking fees are waived for affected passengers.
+            {lang === "ar"
+              ? "تنبيه تجريبي · بسبب الأحوال الجوية قرب دبي (DXB)، قد تتأثر بعض الرحلات الإقليمية مثل WY 603. رسوم إعادة الحجز معفاة للمسافرين المتأثرين."
+              : "Demo Advisory · Due to severe weather cells near Dubai (DXB), select regional departures including WY 603 are subject to schedule adjustments. All rebooking fees are waived for affected passengers."}
           </p>
         </section>
 
         <section className="rounded-lg border border-border bg-card p-5">
           <h2 className="flex items-center gap-2 font-display text-lg font-bold">
             <Plane className="h-4 w-4 text-primary" />
-            Read-Only Flight Status Check (BFF Cached)
+            {copy.statusHeading}
           </h2>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-col gap-1.5 sm:flex-row sm:items-center">
+            <label htmlFor="darksite-flight-query" className="text-xs font-semibold">
+              {lang === "ar" ? "رقم الرحلة:" : "Flight number:"}
+            </label>
             <input
+              id="darksite-flight-query"
               value={flightQuery}
               onChange={(e) => setFlightQuery(e.target.value)}
-              placeholder="Enter flight no. e.g. WY 101"
+              placeholder="e.g. WY 101"
               className="h-10 rounded-md border border-input bg-background px-3 text-sm"
             />
           </div>
@@ -68,7 +79,7 @@ export function DarkSiteView() {
               <p className="mt-1 text-muted-foreground">
                 Scheduled {match.departureTime} – {match.arrivalTime} · Status:{" "}
                 <strong className={match.flightNumber === "WY 603" ? "text-destructive" : "text-success"}>
-                  {match.flightNumber === "WY 603" ? "DISRUPTED — Free Rebooking Active" : "ON TIME"}
+                  {match.flightNumber === "WY 603" ? "DISRUPTED — Free Rebooking Active (Demo)" : "ON TIME (Demo)"}
                 </strong>
               </p>
             </div>
@@ -80,7 +91,7 @@ export function DarkSiteView() {
         <section className="rounded-lg border border-border bg-card p-5">
           <h2 className="flex items-center gap-2 font-display text-lg font-bold">
             <Phone className="h-4 w-4 text-primary" />
-            24/7 Emergency Assistance Directory
+            {copy.directoryHeading}
           </h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-3 text-sm">
             <div className="rounded-md bg-muted p-3">

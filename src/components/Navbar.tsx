@@ -1,19 +1,12 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Globe, Menu, ShieldAlert, Sparkles, X } from "lucide-react";
+import { Globe, LogIn, LogOut, Menu, ShieldAlert, Sparkles, X } from "lucide-react";
 import { useState } from "react";
 import { useIBE } from "../context/IBEContext";
 import { CURRENCIES, type CurrencyCode } from "../data/omanAirRoutes";
 import type { SindbadTier } from "../data/ancillariesAndSeats";
+import { t } from "../lib/i18n";
 import { OmanAirLogo } from "./OmanAirLogo";
 import { Button } from "./ui/button";
-
-const NAV_ITEMS = [
-  { to: "/" as const, en: "Book", ar: "احجز" },
-  { to: "/manage" as const, en: "Manage", ar: "إدارة الحجز" },
-  { to: "/checkin" as const, en: "Check-in", ar: "إتمام السفر" },
-  { to: "/status" as const, en: "Flight Status", ar: "حالة الرحلة" },
-  { to: "/sindbad" as const, en: "Sindbad", ar: "سندباد" },
-];
 
 export function Navbar() {
   const {
@@ -24,11 +17,21 @@ export function Navbar() {
     sindbadSignedIn,
     sindbadTier,
     setSindbadTier,
+    toggleSindbadSignIn,
     sindbadMiles,
     setDarkSiteMode,
   } = useIBE();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [mobileOpen, setMobileOpen] = useState(false);
+  const copy = t(lang);
+
+  const navItems = [
+    { to: "/" as const, label: copy.nav.book },
+    { to: "/manage" as const, label: copy.nav.manage },
+    { to: "/checkin" as const, label: copy.nav.checkin },
+    { to: "/status" as const, label: copy.nav.status },
+    { to: "/sindbad" as const, label: copy.nav.sindbad },
+  ];
 
   const cycleTier = () => {
     const order: SindbadTier[] = ["Blue", "Silver", "Gold"];
@@ -39,12 +42,12 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-40 border-b border-border/80 bg-background/95 backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-        <Link to="/" className="focus:outline-none">
+        <Link to="/" className="focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg">
           <OmanAirLogo />
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex" aria-label="Main navigation">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const active = pathname === item.to;
             return (
               <Link
@@ -56,7 +59,7 @@ export function Navbar() {
                     : "text-foreground/80 hover:bg-muted hover:text-foreground"
                 }`}
               >
-                {lang === "ar" ? item.ar : item.en}
+                {item.label}
               </Link>
             );
           })}
@@ -87,21 +90,39 @@ export function Navbar() {
             {lang === "en" ? "العربية" : "English"}
           </Button>
 
-          <button
-            type="button"
-            onClick={cycleTier}
-            title="Click to switch Sindbad Tier and test live BFF tier-based pricing"
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gold/50 bg-gold/15 px-3 text-xs font-semibold text-foreground transition-colors hover:bg-gold/25"
-          >
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            <span>{sindbadSignedIn ? `Sindbad ${sindbadTier}` : "Guest"}</span>
-            <span className="text-muted-foreground">· {sindbadMiles.toLocaleString()} mi</span>
-          </button>
+          {sindbadSignedIn ? (
+            <div className="inline-flex items-center gap-1">
+              <button
+                type="button"
+                onClick={cycleTier}
+                title="Demo control: click to switch Sindbad tier"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gold/50 bg-gold/15 px-3 text-xs font-semibold text-foreground transition-colors hover:bg-gold/25"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span>Sindbad {sindbadTier}</span>
+                <span className="text-muted-foreground">· {sindbadMiles.toLocaleString()} mi</span>
+              </button>
+              <button
+                type="button"
+                onClick={toggleSindbadSignIn}
+                title={copy.nav.signOut}
+                aria-label={copy.nav.signOut}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <Button variant="secondary" size="sm" onClick={toggleSindbadSignIn} className="h-9 gap-1.5 text-xs font-semibold">
+              <LogIn className="h-3.5 w-3.5" />
+              {copy.nav.guest} · {copy.nav.signIn}
+            </Button>
+          )}
 
           <button
             type="button"
             onClick={() => setDarkSiteMode(true)}
-            title="Activate Dark Site Emergency Mode (FR-31)"
+            title="Activate Dark Site Emergency Mode (Demo)"
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-destructive/40 hover:text-destructive"
             aria-label="Toggle Dark Site emergency mode"
           >
@@ -114,6 +135,7 @@ export function Navbar() {
           className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border md:hidden"
           onClick={() => setMobileOpen((o) => !o)}
           aria-label="Toggle menu"
+          aria-expanded={mobileOpen}
         >
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </button>
@@ -122,7 +144,7 @@ export function Navbar() {
       {mobileOpen && (
         <div className="border-t border-border bg-card px-4 py-4 md:hidden">
           <div className="flex flex-col gap-1">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
@@ -131,7 +153,7 @@ export function Navbar() {
                   pathname === item.to ? "bg-primary/10 text-primary font-semibold" : "text-foreground"
                 }`}
               >
-                {lang === "ar" ? item.ar : item.en}
+                {item.label}
               </Link>
             ))}
           </div>
@@ -149,8 +171,8 @@ export function Navbar() {
             <Button variant="outline" size="sm" onClick={() => setLang(lang === "en" ? "ar" : "en")}>
               {lang === "en" ? "العربية (RTL)" : "English (LTR)"}
             </Button>
-            <Button variant="secondary" size="sm" onClick={cycleTier}>
-              Sindbad {sindbadTier}
+            <Button variant="secondary" size="sm" onClick={toggleSindbadSignIn}>
+              {sindbadSignedIn ? `${copy.nav.signOut} (${sindbadTier})` : copy.nav.signIn}
             </Button>
           </div>
         </div>

@@ -55,6 +55,7 @@ export const DIRECT_ANCILLARIES: AncillaryItem[] = [
   { id: "LNG_MAJAN", code: "LNGM", category: "lounge", name: "Majan Lounge Access (MCT)", nameAr: "دخول صالة مجان (مسقط)", description: "Omani kahwa, hot buffet, quiet nap suites & showers", priceOMR: 24, goldComplimentary: true, longHaulOnly: false },
   { id: "PRI_FAST", code: "FSTK", category: "priority", name: "Security Fast Track", nameAr: "المسار السريع", description: "Dedicated priority immigration & security lanes", priceOMR: 11, goldComplimentary: true },
   { id: "PRI_BOARD", code: "PRBD", category: "priority", name: "Priority Boarding & Bag Drop", nameAr: "أولوية الصعود للطائرة", description: "Board first with guaranteed overhead bin space", priceOMR: 9, goldComplimentary: true, silverComplimentary: true },
+  { id: "CHAUF_LH", code: "CHAF", category: "priority", name: "Muscat Chauffeur & Transit Suite", nameAr: "خدمة السائق الخاص في مسقط", description: "Long-haul exclusive private airport transfer & transit suite", priceOMR: 32, goldComplimentary: true, longHaulOnly: true, badge: "Long-Haul Only" },
 ];
 
 export const MEAL_OPTIONS = [
@@ -66,8 +67,8 @@ export const MEAL_OPTIONS = [
 ];
 
 export const SSR_OPTIONS = [
-  { id: "SSR_WCHR", code: "WCHR", name: "Wheelchair Assistance", status: "HK" as const, note: "Auto-confirmed with airport ground team" },
-  { id: "SSR_BSCT", code: "BSCT", name: "Infant Bassinet (Bulkhead)", status: "PN" as const, note: "Pending aircraft bulkhead allocation" },
+  { id: "SSR_WCHR", code: "WCHR", name: "Wheelchair Assistance", status: "HK" as const, note: "Ground team request recorded (demo)" },
+  { id: "SSR_BSCT", code: "BSCT", name: "Infant Bassinet (Bulkhead)", status: "PN" as const, note: "Pending aircraft bulkhead allocation (demo)" },
   { id: "SSR_UMNR", code: "UMNR", name: "Unaccompanied Minor Escort", status: "HK" as const, note: "Dedicated crew escort (requires airport check-in)" },
 ];
 
@@ -85,21 +86,18 @@ export interface SeatCell {
 export function generateSeatMap(aircraft: "Boeing 787-9 Dreamliner" | "Boeing 737 MAX 8"): SeatCell[] {
   const seats: SeatCell[] = [];
   if (aircraft === "Boeing 787-9 Dreamliner") {
-    // Rows 1-2: Business Studio (1-2-1)
     for (let r = 1; r <= 2; r++) {
       for (const col of ["A", "D", "G", "K"]) {
         const occupied = r === 1 && col === "K";
         seats.push({ id: `${r}${col}`, row: r, col, cabin: "studio", kind: occupied ? "occupied" : "free", priceOMR: 0 });
       }
     }
-    // Rows 3-5: Business Apex Suite (2-2-2)
     for (let r = 3; r <= 5; r++) {
       for (const col of ["A", "B", "D", "G", "J", "K"]) {
         const occupied = (r === 3 && col === "A") || (r === 4 && col === "G");
         seats.push({ id: `${r}${col}`, row: r, col, cabin: "business", kind: occupied ? "occupied" : "free", priceOMR: 0 });
       }
     }
-    // Rows 11-18: Economy (3-3-3)
     for (let r = 11; r <= 18; r++) {
       for (const col of ["A", "B", "C", "D", "E", "F", "H", "J", "K"]) {
         const hash = (r * 13 + col.charCodeAt(0)) % 11;
@@ -122,7 +120,6 @@ export function generateSeatMap(aircraft: "Boeing 787-9 Dreamliner" | "Boeing 73
       }
     }
   } else {
-    // Boeing 737 MAX 8: Rows 1-3 Business (2-2), Rows 7-15 Economy (3-3)
     for (let r = 1; r <= 3; r++) {
       for (const col of ["A", "C", "D", "F"]) {
         const occupied = r === 1 && col === "A";
@@ -156,13 +153,21 @@ export function generateSeatMap(aircraft: "Boeing 787-9 Dreamliner" | "Boeing 73
 
 export interface SavedBookingPNR {
   rloc: string;
-  status: "CONFIRMED" | "HELD" | "DISRUPTED_CXL" | "REFUNDED" | "VOUCHERED";
+  status: "CONFIRMED" | "HELD" | "DISRUPTED_CXL" | "REFUNDED" | "VOUCHERED" | "EXPIRED";
   origin: string;
   destination: string;
   flightNumber: string;
   dateISO: string;
   departureTime: string;
   arrivalTime: string;
+  returnSegment?: {
+    flightNumber: string;
+    dateISO: string;
+    departureTime: string;
+    arrivalTime: string;
+    origin: string;
+    destination: string;
+  };
   aircraft: "Boeing 787-9 Dreamliner" | "Boeing 737 MAX 8";
   fareBrand: FareBrandId;
   passengers: {
@@ -258,6 +263,13 @@ export const SINDBAD_SAVED_TRAVELERS = [
   { id: "trv-2", firstName: "REEM", lastName: "ALBALUSHI", dob: "1998-11-03", gender: "F", passport: "OM4928175", nationality: "Oman", sindbadNo: "SB-8841210" },
   { id: "trv-3", firstName: "YUSUF", lastName: "ALBALUSHI", dob: "2019-02-22", gender: "M", passport: "OM4928199", nationality: "Oman", sindbadNo: "SB-9100342" },
 ];
+
+/** Seeded unclaimed historical PNRs for simulated LMS retro-claim validation (FR-20). */
+export const RETRO_CLAIMABLE_PNRS: Record<string, { route: string; flightNumber: string; miles: number }> = {
+  WY5M2K: { route: "MCT → LHR", flightNumber: "WY 101", miles: 2840 },
+  WY3P8N: { route: "MCT → BKK", flightNumber: "WY 817", miles: 2150 },
+  WY2J4Q: { route: "MCT → DXB", flightNumber: "WY 603", miles: 680 },
+};
 
 export const REDEMPTION_CATALOG = [
   { id: "RED_DF", partner: "Muscat Duty Free", title: "OMR 25 Duty Free Voucher", miles: 6500, category: "Duty Free" },
