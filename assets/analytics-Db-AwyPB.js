@@ -1,0 +1,1 @@
+function e(e,t={}){if(!(typeof window>`u`))try{window.dataLayer=window.dataLayer??[],window.dataLayer.push({event:e,timestamp:new Date().toISOString(),airline:`WY`,...t})}catch{}}export{e as t};
