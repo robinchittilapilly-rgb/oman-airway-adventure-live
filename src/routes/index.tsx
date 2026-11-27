@@ -37,6 +37,7 @@ import {
   VIRTUAL_BUNDLES,
   type SeatCell,
 } from "../data/ancillariesAndSeats";
+import { bffClient, getStoredCartId, setStoredCartId } from "../lib/bff-client";
 import {
   PROMO_CODES,
   calculateSindbadMiles,
@@ -50,11 +51,12 @@ import {
   validatePassengerAgeForType,
 } from "../lib/ibe-rules";
 import { t } from "../lib/i18n";
+import type { BffCartPricing, BffSearchResponse } from "../../bff/types";
 import { FlightSearchWidget, type SearchCriteria } from "../components/ibe/FlightSearchWidget";
 import { SeatMapSelector } from "../components/ibe/SeatMapSelector";
 import { AncillariesPanel } from "../components/ibe/AncillariesPanel";
 import { PassengerFormStep, type PassengerFormData } from "../components/ibe/PassengerFormStep";
-import { PaymentCheckoutStep } from "../components/ibe/PaymentCheckoutStep";
+import { PaymentCheckoutStep, type PaymentMethodId } from "../components/ibe/PaymentCheckoutStep";
 import { Button } from "../components/ui/button";
 
 export const Route = createFileRoute("/")({
@@ -63,7 +65,7 @@ export const Route = createFileRoute("/")({
       { title: "Oman Air | Book Flights Across 20 Global Routes" },
       { name: "description", content: "Search 30-day low fares across 20 Oman Air routes, compare branded fares, choose seats and virtual bundles, and check in seamlessly." },
       { property: "og:title", content: "Oman Air | Book Flights" },
-      { property: "og:description", content: "Oman Air Internet Booking Engine prototype with 30-day fare calendar, Business Studio, and Sindbad rewards." },
+      { property: "og:description", content: "Oman Air Internet Booking Engine with 30-day fare calendar, Business Studio, and Sindbad rewards." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -75,11 +77,25 @@ type FunnelStep = 0 | 1 | 2 | 3 | 4 | 5;
 const CART_DRAFT_KEY = "oman_air_ibe_cart_draft_v1";
 
 function Index() {
-  const { lang, currency, sindbadSignedIn, sindbadTier, addBooking, spendMiles, spendTravelBank, addMiles } = useIBE();
+  const {
+    lang,
+    currency,
+    bffConnected,
+    sindbadSignedIn,
+    sindbadTier,
+    addBooking,
+    syncFromBffUser,
+    spendMiles,
+    spendTravelBank,
+    addMiles,
+  } = useIBE();
   const copy = t(lang);
 
   const [step, setStep] = useState<FunnelStep>(0);
   const [search, setSearch] = useState<SearchCriteria | null>(null);
+  const [cartId, setCartId] = useState<string | null>(null);
+  const [bffSearchData, setBffSearchData] = useState<BffSearchResponse | null>(null);
+  const [bffPricing, setBffPricing] = useState<BffCartPricing | null>(null);
   const [selectedOutboundId, setSelectedOutboundId] = useState<string>("");
   const [selectedReturnId, setSelectedReturnId] = useState<string>("");
   const [selectedBrand, setSelectedBrand] = useState<FareBrandId>("ECO_COMFORT");
@@ -102,8 +118,50 @@ function Index() {
   const [confirmedRloc, setConfirmedRloc] = useState<string | null>(null);
   const [confirmedMode, setConfirmedMode] = useState<"pay" | "hold">("pay");
 
-  // Restore active cart draft from sessionStorage (FR-2)
+  // Restore active cart from BFF (when connected) or local sessionStorage
   useEffect(() => {
+    const storedCartId = getStoredCartId();
+    if (bffConnected && storedCartId) {
+      bffClient
+        .getCart(storedCartId, lang)
+        .then(({ cart }) => {
+          setCartId(cart.cartId);
+          setSearch(cart.search as SearchCriteria);
+          setStep(cart.step);
+          setSelectedOutboundId(cart.selectedOutboundId);
+          if (cart.selectedSecondSegId) setSelectedReturnId(cart.selectedSecondSegId);
+          setSelectedBrand(cart.selectedBrand);
+          setSelectedBundleIds(cart.selectedBundleIds);
+          setSelectedAncillaryIds(cart.selectedAncillaryIds);
+          setSelectedMealId(cart.selectedMealId);
+          setSelectedSsrIds(cart.selectedSsrIds);
+          setInsuranceChoice(cart.insuranceChoice);
+          setBffPricing(cart.pricing);
+          if (cart.passengers.length > 0) {
+            setPaxForms(
+              cart.passengers.map((p) => ({
+                role: p.role,
+                firstName: p.firstName,
+                lastName: p.lastName,
+                dob: p.dob,
+                gender: p.gender,
+                passport: p.passport,
+                nationality: p.nationality,
+                email: p.email ?? "",
+                phone: p.phone ?? "",
+                emergencyName: p.emergencyName ?? "",
+                emergencyPhone: p.emergencyPhone ?? "",
+                sindbadNo: p.sindbadNo ?? "",
+              }))
+            );
+          }
+        })
+        .catch(() => {
+          setStoredCartId(null);
+        });
+      return;
+    }
+
     try {
       const raw = window.sessionStorage.getItem(CART_DRAFT_KEY);
       if (!raw) return;
@@ -138,14 +196,56 @@ function Index() {
     } catch {
       // ignore storage errors
     }
-  }, []);
+  }, [bffConnected, lang]);
 
+  // Sync cart state with BFF when connected, or sessionStorage offline
   useEffect(() => {
-    try {
-      if (step === 0 || step === 5 || !search) {
-        window.sessionStorage.removeItem(CART_DRAFT_KEY);
-        return;
+    if (step === 0 || step === 5 || !search) {
+      if (step === 0 || step === 5) {
+        setStoredCartId(null);
+        try {
+          window.sessionStorage.removeItem(CART_DRAFT_KEY);
+        } catch {
+          // ignore
+        }
       }
+      return;
+    }
+
+    if (bffConnected && selectedOutboundId) {
+      const timer = window.setTimeout(() => {
+        bffClient
+          .syncCart(
+            {
+              cartId: cartId ?? undefined,
+              step: step as 1 | 2 | 3 | 4,
+              search,
+              selectedOutboundId,
+              selectedSecondSegId: selectedReturnId || undefined,
+              selectedBrand,
+              selectedSeatIds: selectedSeats.map((s) => s.id),
+              selectedBundleIds,
+              selectedAncillaryIds,
+              selectedMealId,
+              selectedSsrIds,
+              insuranceChoice,
+              passengers: paxForms,
+            },
+            lang
+          )
+          .then(({ cart }) => {
+            setCartId(cart.cartId);
+            setStoredCartId(cart.cartId);
+            setBffPricing(cart.pricing);
+          })
+          .catch(() => {
+            // Keep local optimistic state if transient error
+          });
+      }, 150);
+      return () => window.clearTimeout(timer);
+    }
+
+    try {
       window.sessionStorage.setItem(
         CART_DRAFT_KEY,
         JSON.stringify({
@@ -166,7 +266,11 @@ function Index() {
     } catch {
       // ignore storage errors
     }
+    return undefined;
   }, [
+    bffConnected,
+    cartId,
+    lang,
     step,
     search,
     selectedOutboundId,
@@ -192,9 +296,10 @@ function Index() {
   }, [search]);
 
   const thirtyDayFares = useMemo(() => {
+    if (bffSearchData?.calendar) return bffSearchData.calendar;
     if (!routeMatch) return [];
     return get30DayFareRepository(routeMatch.route.id);
-  }, [routeMatch]);
+  }, [bffSearchData, routeMatch]);
 
   const activeDayFare = useMemo(() => {
     if (!search || thirtyDayFares.length === 0) return null;
@@ -213,25 +318,25 @@ function Index() {
   }, [search, thirtyDayFares]);
 
   const outboundOptions = useMemo<FlightOption[]>(() => {
-    if (!search) return [];
-    const list = generateFlightOptions(search.origin, search.destination, search.departDate)
-      .filter((f) => (!nonStopOnly ? true : f.stops === 0));
+    const source = bffSearchData?.outboundOptions ?? (search ? generateFlightOptions(search.origin, search.destination, search.departDate) : []);
+    const list = source.filter((f) => (!nonStopOnly ? true : f.stops === 0));
     return [...list].sort((a, b) =>
       sortBy === "duration" ? a.durationMinutes - b.durationMinutes : a.priceMultiplier - b.priceMultiplier
     );
-  }, [search, nonStopOnly, sortBy]);
+  }, [bffSearchData, search, nonStopOnly, sortBy]);
 
   const secondSegmentOptions = useMemo<FlightOption[]>(() => {
     if (!search || search.tripType === "oneway") return [];
-    const list =
-      search.tripType === "roundtrip"
+    const source =
+      bffSearchData?.secondSegmentOptions ??
+      (search.tripType === "roundtrip"
         ? generateFlightOptions(search.destination, search.origin, search.returnDate)
-        : generateFlightOptions(search.multiLeg2Origin, search.multiLeg2Destination, search.multiLeg2Date);
-    const filtered = list.filter((f) => (!nonStopOnly ? true : f.stops === 0));
+        : generateFlightOptions(search.multiLeg2Origin, search.multiLeg2Destination, search.multiLeg2Date));
+    const filtered = source.filter((f) => (!nonStopOnly ? true : f.stops === 0));
     return [...filtered].sort((a, b) =>
       sortBy === "duration" ? a.durationMinutes - b.durationMinutes : a.priceMultiplier - b.priceMultiplier
     );
-  }, [search, nonStopOnly, sortBy]);
+  }, [bffSearchData, search, nonStopOnly, sortBy]);
 
   const selectedOutbound =
     outboundOptions.find((o) => o.id === selectedOutboundId) ?? outboundOptions[0] ?? null;
@@ -240,16 +345,42 @@ function Index() {
 
   const totalPax = search ? getTotalPassengers(search.passengers) : 1;
 
-  const handleRunSearch = (criteria: SearchCriteria) => {
+  const handleRunSearch = async (criteria: SearchCriteria) => {
     setSearch(criteria);
-    const outOpts = generateFlightOptions(criteria.origin, criteria.destination, criteria.departDate);
-    setSelectedOutboundId(outOpts[0]?.id ?? "");
-    const secOpts =
+    setBffPricing(null);
+    setCartId(null);
+    setStoredCartId(null);
+
+    let outOpts = generateFlightOptions(criteria.origin, criteria.destination, criteria.departDate);
+    let secOpts =
       criteria.tripType === "roundtrip"
         ? generateFlightOptions(criteria.destination, criteria.origin, criteria.returnDate)
         : criteria.tripType === "multicity"
           ? generateFlightOptions(criteria.multiLeg2Origin, criteria.multiLeg2Destination, criteria.multiLeg2Date)
           : [];
+
+    if (bffConnected) {
+      try {
+        const res = await bffClient.searchFlights(
+          {
+            ...criteria,
+            currency,
+            nonStopOnly,
+            sortBy,
+          },
+          lang
+        );
+        setBffSearchData(res);
+        outOpts = res.outboundOptions;
+        secOpts = res.secondSegmentOptions;
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "BFF search failed; using fallback.");
+      }
+    } else {
+      setBffSearchData(null);
+    }
+
+    setSelectedOutboundId(outOpts[0]?.id ?? "");
     setSelectedReturnId(secOpts[0]?.id ?? "");
 
     const defaultBrand: FareBrandId =
@@ -266,7 +397,6 @@ function Index() {
 
     const roles = expandPassengerTypes(criteria.passengers);
     const forms: PassengerFormData[] = roles.map((role, i) => {
-      // Only pre-fill Passenger 1 from Sindbad profile when user is actually signed in (FR-77)
       const saved = sindbadSignedIn && i === 0 ? SINDBAD_SAVED_TRAVELERS[0] : undefined;
       const defaultDob =
         role === "Infant"
@@ -320,15 +450,15 @@ function Index() {
   };
 
   const promoEntry = search?.promoCode ? PROMO_CODES[search.promoCode] : undefined;
-  const baseFarePerPaxOMR = computeBrandPricePerPaxOMR(selectedBrand);
-  const baseFareOMR = baseFarePerPaxOMR * totalPax;
+  const fallbackBaseFarePerPaxOMR = computeBrandPricePerPaxOMR(selectedBrand);
+  const fallbackBaseFareOMR = fallbackBaseFarePerPaxOMR * totalPax;
   const leg2TaxOMR =
     search?.tripType === "roundtrip"
       ? (routeMatch?.route.taxesOMR ?? 0)
       : search?.tripType === "multicity"
         ? (leg2RouteMatch?.route.taxesOMR ?? 0)
         : 0;
-  const taxesOMR = ((routeMatch?.route.taxesOMR ?? 0) + leg2TaxOMR) * totalPax;
+  const fallbackTaxesOMR = ((routeMatch?.route.taxesOMR ?? 0) + leg2TaxOMR) * totalPax;
 
   const seatsFeeOMR = selectedSeats.reduce((sum, s) => {
     return (
@@ -360,11 +490,21 @@ function Index() {
 
   const mealOMR = (MEAL_OPTIONS.find((m) => m.id === selectedMealId)?.priceOMR ?? 0) * totalPax;
   const insuranceOMR = insuranceChoice === "yes" ? 12 * totalPax : 0;
-  const ancillariesOMR = seatsFeeOMR + bundlesOMR + directAncOMR + mealOMR + insuranceOMR;
+  const fallbackAncillariesOMR = seatsFeeOMR + bundlesOMR + directAncOMR + mealOMR + insuranceOMR;
+  const fallbackPromoDiscountOMR = promoEntry ? Math.round(fallbackBaseFareOMR * (promoEntry.discountPct / 100)) : 0;
+  const fallbackTotalOMR = Math.max(0, fallbackBaseFareOMR + fallbackTaxesOMR + fallbackAncillariesOMR - fallbackPromoDiscountOMR);
+  const fallbackEarnedMiles = calculateSindbadMiles(
+    Math.max(0, fallbackBaseFareOMR - fallbackPromoDiscountOMR) + fallbackAncillariesOMR,
+    sindbadTier
+  );
 
-  const promoDiscountOMR = promoEntry ? Math.round(baseFareOMR * (promoEntry.discountPct / 100)) : 0;
-  const totalOMR = Math.max(0, baseFareOMR + taxesOMR + ancillariesOMR - promoDiscountOMR);
-  const earnedMiles = calculateSindbadMiles(Math.max(0, baseFareOMR - promoDiscountOMR) + ancillariesOMR, sindbadTier);
+  // Authoritative BFF pricing takes precedence when connected
+  const baseFareOMR = bffPricing?.baseFareOMR ?? fallbackBaseFareOMR;
+  const taxesOMR = bffPricing?.taxesOMR ?? fallbackTaxesOMR;
+  const ancillariesOMR = bffPricing?.ancillariesOMR ?? fallbackAncillariesOMR;
+  const promoDiscountOMR = bffPricing?.promoDiscountOMR ?? fallbackPromoDiscountOMR;
+  const totalOMR = bffPricing?.totalOMR ?? fallbackTotalOMR;
+  const earnedMiles = bffPricing?.earnedMiles ?? fallbackEarnedMiles;
 
   const handleToggleSeat = (seat: SeatCell) => {
     setSelectedSeats((prev) => {
@@ -402,15 +542,65 @@ function Index() {
     setStep(4);
   };
 
-  const handleConfirmBooking = (details: {
+  const handleConfirmBooking = async (details: {
     mode: "pay" | "hold";
     holdHours?: 24 | 48;
+    paymentMethod: PaymentMethodId;
     paymentLabel: string;
     milesUsed: number;
     travelBankUsedOMR: number;
     finalCashOMR: number;
   }) => {
     if (!search || !routeMatch || !selectedOutbound) return;
+
+    if (bffConnected && cartId) {
+      try {
+        // Ensure latest passenger form edits are synced before checkout
+        const synced = await bffClient.syncCart(
+          {
+            cartId,
+            step: 4,
+            search,
+            selectedOutboundId: selectedOutbound.id,
+            selectedSecondSegId: selectedSecondSeg?.id,
+            selectedBrand,
+            selectedSeatIds: selectedSeats.map((s) => s.id),
+            selectedBundleIds,
+            selectedAncillaryIds,
+            selectedMealId,
+            selectedSsrIds,
+            insuranceChoice,
+            passengers: paxForms,
+          },
+          lang
+        );
+        const res = await bffClient.checkoutCart(
+          synced.cart.cartId,
+          {
+            cartId: synced.cart.cartId,
+            mode: details.mode,
+            holdHours: details.holdHours,
+            paymentMethod: details.paymentMethod,
+            paymentDetailLabel: details.paymentLabel,
+            useMilesSplit: details.milesUsed > 0,
+            useTravelBank: details.travelBankUsedOMR > 0,
+          },
+          lang
+        );
+        addBooking(res.booking);
+        syncFromBffUser(res.session);
+        setStoredCartId(null);
+        setCartId(null);
+        setConfirmedRloc(res.booking.rloc);
+        setConfirmedMode(details.mode);
+        setStep(5);
+        toast.success(`PNR ${res.booking.rloc} committed via BFF!`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "BFF checkout failed.");
+      }
+      return;
+    }
+
     if (details.milesUsed > 0) spendMiles(details.milesUsed);
     if (details.travelBankUsedOMR > 0) spendTravelBank(details.travelBankUsedOMR);
     if (details.mode === "pay" && sindbadSignedIn) addMiles(earnedMiles);
@@ -480,9 +670,9 @@ function Index() {
     });
   }, [regionFilter]);
 
-  const nearbyAltCodes = search
-    ? AIRPORTS.find((a) => a.code === search.destination)?.nearbyCodes ?? []
-    : [];
+  const nearbyAltCodes =
+    bffSearchData?.nearbyAlternatives ??
+    (search ? AIRPORTS.find((a) => a.code === search.destination)?.nearbyCodes ?? [] : []);
 
   return (
     <div>
@@ -501,6 +691,7 @@ function Index() {
           <p className="inline-flex items-center gap-2 rounded-full border border-gold/40 bg-teal-deep/75 px-3.5 py-1 text-xs font-semibold tracking-wide text-gold backdrop-blur-sm">
             <Sparkles className="h-3.5 w-3.5" />
             {copy.hero.badge}
+            {bffConnected && " · BFF Active"}
           </p>
           <h1 className="mt-4 max-w-3xl font-display text-4xl font-extrabold tracking-tight text-primary-foreground sm:text-6xl">
             {copy.hero.title}
@@ -546,10 +737,10 @@ function Index() {
             </div>
             <div className="text-xs font-bold text-primary">
               {search.origin} → {search.destination} · {search.departDate} · {totalPax} guest(s)
+              {bffConnected && cartId ? ` · Cart ${cartId.slice(0, 10)}` : ""}
             </div>
           </div>
 
-          {/* STEP 1: 30-Day Low Fare Calendar + Selectable Flight Results + Branded Fares */}
           {step === 1 && (
             <div className="space-y-6">
               <div className="rounded-2xl border border-border bg-card p-5">
@@ -559,7 +750,9 @@ function Index() {
                     30-Day Low Fare Calendar ({routeMatch.route.id})
                   </h2>
                   <span className="text-xs text-muted-foreground">
-                    Showing {FARE_BRANDS[selectedBrand].name} outbound prices (synthetic 30-day repository)
+                    {bffSearchData
+                      ? `Served via BFF ${bffSearchData.cached ? "(Fare Cache Hit)" : "(PSS Adapter)"}`
+                      : `Showing ${FARE_BRANDS[selectedBrand].name} outbound prices`}
                   </span>
                 </div>
                 <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
@@ -627,7 +820,6 @@ function Index() {
                 </div>
               ) : (
                 <>
-                  {/* Working Filter & Sort Bar (FR-56) */}
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/50 px-4 py-2.5 text-xs">
                     <div className="flex items-center gap-3">
                       <span className="inline-flex items-center gap-1 font-semibold"><Filter className="h-3.5 w-3.5" /> Filters:</span>
@@ -655,7 +847,6 @@ function Index() {
                     </div>
                   </div>
 
-                  {/* Selectable Outbound Flight Results */}
                   <div className="rounded-2xl border border-border bg-card p-5 space-y-5">
                     <div>
                       <h3 className="font-display text-base font-bold">
@@ -707,7 +898,6 @@ function Index() {
                       )}
                     </div>
 
-                    {/* Return or Multi-City Leg 2 Selector (FR-53, FR-54) */}
                     {search.tripType !== "oneway" && secondSegmentOptions.length > 0 && (
                       <div className="border-t border-border pt-5">
                         <h3 className="font-display text-base font-bold">
@@ -757,7 +947,6 @@ function Index() {
                       </div>
                     )}
 
-                    {/* Branded Fares Comparison Matrix (FR-62, FR-83, FR-59 promo preview) */}
                     {selectedOutbound && (
                       <div className="border-t border-border pt-5">
                         <h3 className="font-display text-base font-bold">Compare Branded Fares</h3>
@@ -836,7 +1025,6 @@ function Index() {
             </div>
           )}
 
-          {/* STEP 2: Interactive 2D Seat Map + Virtual Bundles + Ancillaries */}
           {step === 2 && selectedOutbound && (
             <div className="space-y-6">
               <SeatMapSelector
@@ -880,7 +1068,6 @@ function Index() {
             </div>
           )}
 
-          {/* STEP 3: Passengers & APIS */}
           {step === 3 && (
             <div className="space-y-6">
               <PassengerFormStep
@@ -902,7 +1089,6 @@ function Index() {
             </div>
           )}
 
-          {/* STEP 4: Review & Payment */}
           {step === 4 && selectedOutbound && (
             <div className="space-y-4">
               <PaymentCheckoutStep
@@ -951,17 +1137,16 @@ function Index() {
             </div>
           )}
 
-          {/* STEP 5: Instant PNR Confirmation + Post-Booking Cross-Sell */}
           {step === 5 && confirmedRloc && (
             <div className="mx-auto max-w-2xl rounded-2xl border-2 border-success/40 bg-card p-8 text-center">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-success/15 text-success">
                 <Ticket className="h-7 w-7" />
               </div>
               <h2 className="mt-4 font-display text-3xl font-extrabold">
-                {confirmedMode === "hold" ? "Fare Held (Demo Booking)" : "Demo Booking Confirmed!"}
+                {confirmedMode === "hold" ? "Fare Held" : "Booking Confirmed!"}
               </h2>
               <p className="mt-2 text-sm text-muted-foreground">
-                Your simulated Oman Air Record Locator (RLOC) is saved locally and synced to Manage My Booking & Check-in.
+                Your Oman Air Record Locator (RLOC) is synced across Manage My Booking & Check-in.
               </p>
               <div className="mx-auto mt-5 inline-block rounded-2xl border border-gold bg-gold/15 px-8 py-4">
                 <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Booking Reference</p>
@@ -983,7 +1168,6 @@ function Index() {
         </section>
       )}
 
-      {/* 20-Route Fare Explorer */}
       {step === 0 && (
         <>
           <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">

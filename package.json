@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
+    "bff:dev": "tsx bff/server.ts",
+    "bff:build": "esbuild bff/server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist-bff/server.mjs",
+    "bff:start": "node dist-bff/server.mjs",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
@@ -18,6 +21,7 @@
     "shell-quote": ">=1.11.0"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.11",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -55,6 +59,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
+    "hono": "^4.13.23",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.575.0",
     "react": "^19.2.0",
@@ -89,6 +94,7 @@
     "jsdom": "^20.0.3",
     "nitro": "3.0.260603-beta",
     "prettier": "^3.7.3",
+    "tsx": "^4.23.15",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.73.0",
     "vite": "8.1.7",

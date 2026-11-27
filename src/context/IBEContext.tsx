@@ -1,7 +1,10 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { CurrencyCode } from "../data/omanAirRoutes";
-import { INITIAL_SAMPLE_PNRS, type SavedBookingPNR, type SindbadTier } from "../data/ancillariesAndSeats";
+import { INITIAL_SAMPLE_PNRS, type HouseholdMember, type SavedBookingPNR, type SindbadTier } from "../data/ancillariesAndSeats";
+export type { HouseholdMember };
+import { bffClient, getConfiguredBffUrl } from "../lib/bff-client";
 import { isHoldExpired } from "../lib/ibe-rules";
+import type { BffSessionUser } from "../../bff/types";
 
 export type AppLang = "en" | "ar";
 
@@ -15,55 +18,37 @@ export interface RecentSearch {
   passengers: number;
 }
 
-export interface HouseholdMember {
-  id: string;
-  name: string;
-  relation: string;
-  sindbadNo: string;
-  contributedMiles: number;
-}
-
-interface IBEPersistedState {
+interface IBEPersistedPrefs {
   lang: AppLang;
   currency: CurrencyCode;
+  darkSiteMode: boolean;
+  recentSearches: RecentSearch[];
+}
+
+const PREFS_STORAGE_KEY = "oman_air_ibe_prefs_v1";
+
+const DEFAULT_PREFS: IBEPersistedPrefs = {
+  lang: "en",
+  currency: "OMR",
+  darkSiteMode: false,
+  recentSearches: [
+    { id: "rs-1", origin: "MCT", destination: "LHR", departDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10), tripType: "roundtrip", passengers: 2 },
+    { id: "rs-2", origin: "MCT", destination: "DXB", departDate: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10), tripType: "oneway", passengers: 1 },
+  ],
+};
+
+interface IBEContextValue extends IBEPersistedPrefs {
+  bffUrl: string | null;
+  bffConnected: boolean;
   sindbadSignedIn: boolean;
   sindbadMemberName: string;
   sindbadTier: SindbadTier;
   sindbadMiles: number;
   tierPoints: number;
   travelBankOMR: number;
-  darkSiteMode: boolean;
-  recentSearches: RecentSearch[];
   bookings: SavedBookingPNR[];
   household: HouseholdMember[];
   claimedPnrs: string[];
-}
-
-const STORAGE_KEY = "oman_air_ibe_state_v2";
-
-const DEFAULT_STATE: IBEPersistedState = {
-  lang: "en",
-  currency: "OMR",
-  sindbadSignedIn: true,
-  sindbadMemberName: "Tariq Al-Balushi",
-  sindbadTier: "Gold",
-  sindbadMiles: 68450,
-  tierPoints: 420,
-  travelBankOMR: 65,
-  darkSiteMode: false,
-  recentSearches: [
-    { id: "rs-1", origin: "MCT", destination: "LHR", departDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10), tripType: "roundtrip", passengers: 2 },
-    { id: "rs-2", origin: "MCT", destination: "DXB", departDate: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10), tripType: "oneway", passengers: 1 },
-  ],
-  bookings: INITIAL_SAMPLE_PNRS,
-  household: [
-    { id: "hh-1", name: "Reem Al-Balushi", relation: "Spouse", sindbadNo: "SB-8841210", contributedMiles: 14200 },
-    { id: "hh-2", name: "Yusuf Al-Balushi", relation: "Child", sindbadNo: "SB-9100342", contributedMiles: 4850 },
-  ],
-  claimedPnrs: [],
-};
-
-interface IBEContextValue extends IBEPersistedState {
   setLang: (lang: AppLang) => void;
   setCurrency: (currency: CurrencyCode) => void;
   setSindbadTier: (tier: SindbadTier) => void;
@@ -74,6 +59,9 @@ interface IBEContextValue extends IBEPersistedState {
   addRecentSearch: (s: Omit<RecentSearch, "id">) => void;
   addBooking: (b: SavedBookingPNR) => void;
   updateBooking: (rloc: string, updater: (prev: SavedBookingPNR) => SavedBookingPNR) => void;
+  syncFromBffUser: (user: BffSessionUser) => void;
+  setHouseholdList: (members: HouseholdMember[]) => void;
+  refreshFromBff: () => Promise<void>;
   spendMiles: (miles: number) => boolean;
   addMiles: (miles: number, pnr?: string) => void;
   addTravelBank: (omr: number) => void;
@@ -93,19 +81,57 @@ function enforceHoldExpiries(bookings: SavedBookingPNR[]): SavedBookingPNR[] {
 }
 
 export function IBEProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<IBEPersistedState>(DEFAULT_STATE);
+  const [prefs, setPrefs] = useState<IBEPersistedPrefs>(DEFAULT_PREFS);
   const [hydrated, setHydrated] = useState(false);
+
+  const bffUrl = getConfiguredBffUrl();
+  const [bffConnected, setBffConnected] = useState(false);
+  const [sindbadSignedIn, setSindbadSignedIn] = useState(true);
+  const [sindbadMemberName, setSindbadMemberName] = useState("Tariq Al-Balushi");
+  const [sindbadTier, setSindbadTierState] = useState<SindbadTier>("Gold");
+  const [sindbadMiles, setSindbadMiles] = useState(68450);
+  const [tierPoints, setTierPoints] = useState(420);
+  const [travelBankOMR, setTravelBankOMR] = useState(65);
+  const [bookings, setBookings] = useState<SavedBookingPNR[]>(INITIAL_SAMPLE_PNRS);
+  const [household, setHousehold] = useState<HouseholdMember[]>([
+    { id: "hh-1", name: "Reem Al-Balushi", relation: "Spouse", sindbadNo: "SB-8841210", contributedMiles: 14200 },
+    { id: "hh-2", name: "Yusuf Al-Balushi", relation: "Child", sindbadNo: "SB-9100342", contributedMiles: 4850 },
+  ]);
+  const [claimedPnrs, setClaimedPnrs] = useState<string[]>([]);
+
+  const syncFromBffUser = (user: BffSessionUser) => {
+    setSindbadSignedIn(user.signedIn);
+    if (user.memberName) setSindbadMemberName(user.memberName);
+    setSindbadTierState(user.tier);
+    setSindbadMiles(user.miles);
+    setTierPoints(user.tierPoints);
+    setTravelBankOMR(user.travelBankOMR);
+  };
+
+  const refreshFromBff = async () => {
+    if (!bffUrl) return;
+    try {
+      const [sessRes, bookRes, loyRes] = await Promise.all([
+        bffClient.getSession(prefs.lang),
+        bffClient.listBookings(prefs.lang),
+        bffClient.getLoyaltyProfile(prefs.lang),
+      ]);
+      syncFromBffUser(sessRes.user);
+      setBookings(enforceHoldExpiries(bookRes.bookings));
+      setHousehold(loyRes.household);
+      setClaimedPnrs(loyRes.claimedPnrs);
+      setBffConnected(true);
+    } catch {
+      setBffConnected(false);
+    }
+  };
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const raw = window.localStorage.getItem(PREFS_STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<IBEPersistedState>;
-        setState((prev) => ({
-          ...prev,
-          ...parsed,
-          bookings: enforceHoldExpiries(parsed.bookings ?? prev.bookings),
-        }));
+        const parsed = JSON.parse(raw) as Partial<IBEPersistedPrefs>;
+        setPrefs((prev) => ({ ...prev, ...parsed }));
       }
     } catch {
       // ignore storage errors
@@ -116,33 +142,69 @@ export function IBEProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!hydrated) return;
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      window.localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(prefs));
     } catch {
       // ignore storage quota errors
     }
-  }, [state, hydrated]);
+  }, [prefs, hydrated]);
 
   useEffect(() => {
-    document.documentElement.dir = state.lang === "ar" ? "rtl" : "ltr";
-    document.documentElement.lang = state.lang;
-  }, [state.lang]);
+    if (!hydrated || !bffUrl) return;
+    void refreshFromBff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, bffUrl]);
+
+  useEffect(() => {
+    document.documentElement.dir = prefs.lang === "ar" ? "rtl" : "ltr";
+    document.documentElement.lang = prefs.lang;
+  }, [prefs.lang]);
 
   const value: IBEContextValue = {
-    ...state,
-    setLang: (lang) => setState((s) => ({ ...s, lang })),
-    setCurrency: (currency) => setState((s) => ({ ...s, currency })),
-    setSindbadTier: (sindbadTier) => setState((s) => ({ ...s, sindbadTier, sindbadSignedIn: true })),
-    signInSindbad: (name) =>
-      setState((s) => ({
-        ...s,
-        sindbadSignedIn: true,
-        sindbadMemberName: name?.trim() || s.sindbadMemberName || "Tariq Al-Balushi",
-      })),
-    signOutSindbad: () => setState((s) => ({ ...s, sindbadSignedIn: false })),
-    toggleSindbadSignIn: () => setState((s) => ({ ...s, sindbadSignedIn: !s.sindbadSignedIn })),
-    setDarkSiteMode: (darkSiteMode) => setState((s) => ({ ...s, darkSiteMode })),
+    ...prefs,
+    bffUrl,
+    bffConnected,
+    sindbadSignedIn,
+    sindbadMemberName,
+    sindbadTier,
+    sindbadMiles,
+    tierPoints,
+    travelBankOMR,
+    bookings,
+    household,
+    claimedPnrs,
+    setLang: (lang) => setPrefs((s) => ({ ...s, lang })),
+    setCurrency: (currency) => setPrefs((s) => ({ ...s, currency })),
+    setSindbadTier: (tier) => {
+      setSindbadTierState(tier);
+      setSindbadSignedIn(true);
+      if (bffConnected) {
+        void bffClient.switchTier(tier, prefs.lang).then((r) => syncFromBffUser(r.user)).catch(() => {});
+      }
+    },
+    signInSindbad: (name) => {
+      setSindbadSignedIn(true);
+      if (name?.trim()) setSindbadMemberName(name.trim());
+      if (bffConnected) {
+        void bffClient.login(name, undefined, prefs.lang).then((r) => syncFromBffUser(r.user)).catch(() => {});
+      }
+    },
+    signOutSindbad: () => {
+      setSindbadSignedIn(false);
+      if (bffConnected) {
+        void bffClient.logout(prefs.lang).then((r) => syncFromBffUser(r.user)).catch(() => {});
+      }
+    },
+    toggleSindbadSignIn: () => {
+      const next = !sindbadSignedIn;
+      setSindbadSignedIn(next);
+      if (bffConnected) {
+        const req = next ? bffClient.login(undefined, undefined, prefs.lang) : bffClient.logout(prefs.lang);
+        void req.then((r) => syncFromBffUser(r.user)).catch(() => {});
+      }
+    },
+    setDarkSiteMode: (darkSiteMode) => setPrefs((s) => ({ ...s, darkSiteMode })),
     addRecentSearch: (search) =>
-      setState((s) => ({
+      setPrefs((s) => ({
         ...s,
         recentSearches: [
           { ...search, id: `rs-${Date.now()}` },
@@ -152,30 +214,26 @@ export function IBEProvider({ children }: { children: ReactNode }) {
         ].slice(0, 5),
       })),
     addBooking: (booking) =>
-      setState((s) => ({ ...s, bookings: [booking, ...s.bookings.filter((b) => b.rloc !== booking.rloc)] })),
+      setBookings((prev) => [booking, ...prev.filter((b) => b.rloc !== booking.rloc)]),
     updateBooking: (rloc, updater) =>
-      setState((s) => ({
-        ...s,
-        bookings: s.bookings.map((b) => (b.rloc === rloc ? updater(b) : b)),
-      })),
+      setBookings((prev) => prev.map((b) => (b.rloc === rloc ? updater(b) : b))),
+    syncFromBffUser,
+    setHouseholdList: setHousehold,
+    refreshFromBff,
     spendMiles: (miles) => {
-      if (state.sindbadMiles < miles) return false;
-      setState((s) => ({ ...s, sindbadMiles: Math.max(0, s.sindbadMiles - miles) }));
+      if (sindbadMiles < miles) return false;
+      setSindbadMiles((m) => Math.max(0, m - miles));
       return true;
     },
-    addMiles: (miles, pnr) =>
-      setState((s) => ({
-        ...s,
-        sindbadMiles: s.sindbadMiles + miles,
-        tierPoints: s.tierPoints + Math.round(miles / 80),
-        claimedPnrs: pnr ? [...s.claimedPnrs, pnr] : s.claimedPnrs,
-      })),
-    addTravelBank: (omr) => setState((s) => ({ ...s, travelBankOMR: +(s.travelBankOMR + omr).toFixed(2) })),
-    spendTravelBank: (omr) => setState((s) => ({ ...s, travelBankOMR: Math.max(0, +(s.travelBankOMR - omr).toFixed(2)) })),
-    addHouseholdMember: (m) =>
-      setState((s) => ({ ...s, household: [...s.household, { ...m, id: `hh-${Date.now()}` }] })),
-    removeHouseholdMember: (id) =>
-      setState((s) => ({ ...s, household: s.household.filter((h) => h.id !== id) })),
+    addMiles: (miles, pnr) => {
+      setSindbadMiles((m) => m + miles);
+      setTierPoints((tp) => tp + Math.round(miles / 80));
+      if (pnr) setClaimedPnrs((prev) => [...prev, pnr]);
+    },
+    addTravelBank: (omr) => setTravelBankOMR((v) => +(v + omr).toFixed(2)),
+    spendTravelBank: (omr) => setTravelBankOMR((v) => Math.max(0, +(v - omr).toFixed(2))),
+    addHouseholdMember: (m) => setHousehold((prev) => [...prev, { ...m, id: `hh-${Date.now()}` }]),
+    removeHouseholdMember: (id) => setHousehold((prev) => prev.filter((h) => h.id !== id)),
   };
 
   return <IBEContext.Provider value={value}>{children}</IBEContext.Provider>;

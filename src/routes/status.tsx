@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Plane, Search } from "lucide-react";
 import { useIBE } from "../context/IBEContext";
 import { AIRPORTS, OMAN_AIR_20_ROUTES, formatDuration } from "../data/omanAirRoutes";
+import { bffClient } from "../lib/bff-client";
 import { t } from "../lib/i18n";
 import { Button } from "../components/ui/button";
 
@@ -10,9 +11,9 @@ export const Route = createFileRoute("/status")({
   head: () => ({
     meta: [
       { title: "Flight Status & Timetable | Oman Air" },
-      { name: "description", content: "Check Oman Air demo flight status, terminal, gate, and timetable across 20 routes from Muscat International Airport." },
+      { name: "description", content: "Check Oman Air flight status, terminal, gate, and timetable across 20 routes via BFF cache." },
       { property: "og:title", content: "Flight Status | Oman Air" },
-      { property: "og:description", content: "Oman Air departures, arrivals, and 20-route timetable prototype." },
+      { property: "og:description", content: "Oman Air departures, arrivals, and 20-route timetable via BFF cache." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -22,10 +23,42 @@ export const Route = createFileRoute("/status")({
 
 function FlightStatusPage() {
   const [query, setQuery] = useState("");
-  const { lang } = useIBE();
+  const { lang, bffConnected } = useIBE();
   const copy = t(lang).status;
+  const [bffItems, setBffItems] = useState<(typeof OMAN_AIR_20_ROUTES[number] & { gate: string; status: string })[] | null>(null);
+  const [bffCached, setBffCached] = useState(false);
 
-  const filtered = OMAN_AIR_20_ROUTES.filter((r) => {
+  useEffect(() => {
+    if (!bffConnected) {
+      setBffItems(null);
+      return;
+    }
+    let active = true;
+    bffClient
+      .getFlightStatus(query, lang)
+      .then((res) => {
+        if (!active) return;
+        setBffItems(res.items);
+        setBffCached(res.cached);
+      })
+      .catch(() => {
+        if (active) setBffItems(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [query, lang, bffConnected]);
+
+  const fallbackFiltered = OMAN_AIR_20_ROUTES.map((r, idx) => ({
+    ...r,
+    gate: `T1 · A${10 + (idx % 12)}`,
+    status:
+      r.flightNumber === "WY 603"
+        ? "DISRUPTED (IRROPS)"
+        : idx % 5 === 1
+          ? "BOARDING"
+          : "ON TIME",
+  })).filter((r) => {
     const q = query.trim().toUpperCase();
     if (!q) return true;
     const dest = AIRPORTS.find((a) => a.code === r.destination);
@@ -36,11 +69,20 @@ function FlightStatusPage() {
     );
   });
 
+  const rows = bffItems ?? fallbackFiltered;
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-extrabold">{copy.title}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="font-display text-3xl font-extrabold">{copy.title}</h1>
+            {bffConnected && (
+              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
+                BFF API {bffCached ? "(Cache Hit)" : "(Live BFF)"}
+              </span>
+            )}
+          </div>
           <p className="mt-1 text-sm text-muted-foreground">{copy.subtitle}</p>
         </div>
         <div className="relative w-full sm:w-72">
@@ -64,20 +106,20 @@ function FlightStatusPage() {
               <th className="px-4 py-3 text-start">Route</th>
               <th className="px-4 py-3 text-start">Schedule</th>
               <th className="px-4 py-3 text-start">Aircraft</th>
-              <th className="px-4 py-3 text-start">Gate (Demo)</th>
-              <th className="px-4 py-3 text-start">Status (Demo)</th>
+              <th className="px-4 py-3 text-start">Gate</th>
+              <th className="px-4 py-3 text-start">Status</th>
               <th className="px-4 py-3 text-end">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {filtered.map((r, idx) => {
+            {rows.map((r) => {
               const dest = AIRPORTS.find((a) => a.code === r.destination);
-              const status =
-                r.flightNumber === "WY 603"
-                  ? { label: "DISRUPTED (IRROPS)", cls: "bg-destructive/15 text-destructive" }
-                  : idx % 5 === 1
-                    ? { label: "BOARDING", cls: "bg-gold/25 text-foreground" }
-                    : { label: "ON TIME", cls: "bg-success/15 text-success" };
+              const cls =
+                r.status.startsWith("DISRUPTED")
+                  ? "bg-destructive/15 text-destructive"
+                  : r.status === "BOARDING"
+                    ? "bg-gold/25 text-foreground"
+                    : "bg-success/15 text-success";
               return (
                 <tr key={r.id} className="hover:bg-muted/30">
                   <td className="px-4 py-3 font-display font-bold text-primary">
@@ -91,10 +133,10 @@ function FlightStatusPage() {
                     {r.departureTime} – {r.arrivalTime} ({formatDuration(r.durationMinutes)})
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{r.aircraft}</td>
-                  <td className="px-4 py-3 font-semibold text-xs">T1 · A{10 + (idx % 12)}</td>
+                  <td className="px-4 py-3 font-semibold text-xs">{r.gate}</td>
                   <td className="px-4 py-3">
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${status.cls}`}>
-                      {status.label}
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${cls}`}>
+                      {r.status}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-end">

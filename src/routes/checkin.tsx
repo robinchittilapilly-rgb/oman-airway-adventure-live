@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { useIBE } from "../context/IBEContext";
 import { formatMoney } from "../data/omanAirRoutes";
+import { bffClient } from "../lib/bff-client";
 import {
   buildIataBcbpString,
   generateUniqueBagTagNumber,
@@ -27,7 +28,7 @@ export const Route = createFileRoute("/checkin")({
       { title: "Online Check-In & Digital Boarding Pass | Oman Air" },
       { name: "description", content: "Check in online for your Oman Air flight, generate IATA BCBP digital boarding passes, digital bag tags, and opt into biometric boarding." },
       { property: "og:title", content: "Online Check-In | Oman Air" },
-      { property: "og:description", content: "Oman Air online check-in prototype with IATA BCBP boarding pass generation and disruption rebooking." },
+      { property: "og:description", content: "Oman Air online check-in with IATA BCBP boarding passes and disruption rebooking." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -36,7 +37,18 @@ export const Route = createFileRoute("/checkin")({
 });
 
 function CheckInPage() {
-  const { bookings, updateBooking, spendMiles, sindbadMiles, sindbadSignedIn, currency, lang } = useIBE();
+  const {
+    bffConnected,
+    bookings,
+    addBooking,
+    updateBooking,
+    spendMiles,
+    syncFromBffUser,
+    sindbadMiles,
+    sindbadSignedIn,
+    currency,
+    lang,
+  } = useIBE();
   const copy = t(lang).checkin;
 
   const [selectedRloc, setSelectedRloc] = useState(bookings[0]?.rloc ?? "WY7K9M");
@@ -55,8 +67,18 @@ function CheckInPage() {
       booking.status === "REFUNDED" ||
       booking.status === "VOUCHERED");
 
-  const handleCompleteCheckIn = () => {
+  const handleCompleteCheckIn = async () => {
     if (!booking) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.completeCheckIn(booking.rloc, biometricConsent, bagTagRequested, lang);
+        addBooking(res.booking);
+        toast.success("BFF DCS check-in complete! IATA BCBP boarding passes issued.");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Check-in failed.");
+      }
+      return;
+    }
     updateBooking(booking.rloc, (prev) => ({
       ...prev,
       biometricOptIn: biometricConsent,
@@ -69,8 +91,18 @@ function CheckInPage() {
     toast.success("Demo check-in complete! IATA BCBP boarding pass preview generated.");
   };
 
-  const handleUndoCheckIn = () => {
+  const handleUndoCheckIn = async () => {
     if (!booking) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.offloadCheckIn(booking.rloc, lang);
+        addBooking(res.booking);
+        toast.info("Passenger off-loaded via BFF DCS.");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Off-load failed.");
+      }
+      return;
+    }
     updateBooking(booking.rloc, (prev) => ({
       ...prev,
       passengers: prev.passengers.map((p) => ({ ...p, checkedIn: false })),
@@ -78,8 +110,24 @@ function CheckInPage() {
     toast.info("Passenger off-loaded (Demo DCS check-in undone).");
   };
 
-  const handleOneClickIrropsCheckIn = () => {
+  const handleOneClickIrropsCheckIn = async () => {
     if (!booking) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.applyIrrops(booking.rloc, {
+          action: "rebook_and_checkin",
+          flightNumber: "WY 607",
+          departureTime: "14:15",
+          arrivalTime: "15:25",
+        }, lang);
+        addBooking(res.booking);
+        syncFromBffUser(res.user);
+        toast.success("Re-accommodated onto WY 607 and checked in via BFF!");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "IRROPS check-in failed.");
+      }
+      return;
+    }
     updateBooking(booking.rloc, (prev) => {
       const { disruptionNote: _removed, ...rest } = prev;
       return {
@@ -98,8 +146,19 @@ function CheckInPage() {
     toast.success("Re-accommodated onto WY 607 and checked in (Demo)!");
   };
 
-  const handleCheckInUpgrade = (kind: "biz" | "bag") => {
+  const handleCheckInUpgrade = async (kind: "biz" | "bag") => {
     if (!booking) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.upgradeCheckIn(booking.rloc, kind, payWithMiles, lang);
+        addBooking(res.booking);
+        syncFromBffUser(res.user);
+        toast.success("Check-in upgrade applied via BFF!");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Upgrade failed.");
+      }
+      return;
+    }
     const priceOMR = kind === "biz" ? 115 : 14;
     const milesCost = priceOMR * 400;
     const label = kind === "biz" ? "Check-in Business Upgrade" : "Check-in Extra 10 kg Bag";
@@ -147,7 +206,14 @@ function CheckInPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-      <h1 className="font-display text-3xl font-extrabold">{copy.title}</h1>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="font-display text-3xl font-extrabold">{copy.title}</h1>
+        {bffConnected && (
+          <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
+            BFF Connected
+          </span>
+        )}
+      </div>
       <p className="mt-1 text-sm text-muted-foreground">{copy.subtitle}</p>
 
       <div className="mt-6 flex flex-wrap gap-2">
@@ -189,7 +255,7 @@ function CheckInPage() {
                 <AlertTriangle className="mt-0.5 h-6 w-6 text-destructive" />
                 <div>
                   <h2 className="font-display text-xl font-bold text-destructive">
-                    Disruption Detected on {booking.flightNumber} — Re-Protection Ready (Demo)
+                    Disruption Detected on {booking.flightNumber} — Re-Protection Ready
                   </h2>
                   <p className="mt-1 text-sm">{booking.disruptionNote}</p>
                   <div className="mt-4 flex flex-wrap gap-3">
@@ -228,7 +294,7 @@ function CheckInPage() {
                         <div>
                           <p className="font-bold">{p.firstName} {p.lastName}</p>
                           <p className="text-xs text-muted-foreground">
-                            APIS Format Checked (Demo) · Passport {p.passport} · Seat {p.seat}
+                            APIS Format Checked · Passport {p.passport} · Seat {p.seat}
                           </p>
                         </div>
                         <span className="rounded-full bg-success/15 px-2.5 py-0.5 text-xs font-bold text-success">Ready</span>
@@ -239,13 +305,13 @@ function CheckInPage() {
                   <div className="mt-4 space-y-2.5 border-t border-border pt-4 text-xs">
                     <label htmlFor="checkin-bag-tag" className="flex cursor-pointer items-center justify-between rounded-xl border border-border p-3">
                       <span className="flex items-center gap-2 font-semibold">
-                        <Luggage className="h-4 w-4 text-primary" /> Generate Unique Digital Bag Tag (Demo)
+                        <Luggage className="h-4 w-4 text-primary" /> Generate Unique Digital Bag Tag
                       </span>
                       <input id="checkin-bag-tag" type="checkbox" checked={bagTagRequested} onChange={(e) => setBagTagRequested(e.target.checked)} />
                     </label>
                     <label htmlFor="checkin-biometric" className="flex cursor-pointer items-center justify-between rounded-xl border border-border p-3">
                       <span className="flex items-center gap-2 font-semibold">
-                        <ScanFace className="h-4 w-4 text-primary" /> Biometric Smart Travel Opt-in (Demo Consent)
+                        <ScanFace className="h-4 w-4 text-primary" /> Biometric Smart Travel Opt-in (BIMS Hook)
                       </span>
                       <input id="checkin-biometric" type="checkbox" checked={biometricConsent} onChange={(e) => setBiometricConsent(e.target.checked)} />
                     </label>
@@ -260,7 +326,7 @@ function CheckInPage() {
               <div className="lg:col-span-5">
                 <div className="rounded-2xl border border-gold/50 bg-gold/10 p-5">
                   <h3 className="font-display text-lg font-bold">Last-Minute Check-In Upgrades</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">Demo airport-day offers updated directly on your booking.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Airport-day offers updated directly on your booking.</p>
                   <label htmlFor="checkin-pay-miles" className="mt-3 flex items-center gap-2 text-xs font-medium">
                     <input
                       id="checkin-pay-miles"
@@ -287,7 +353,7 @@ function CheckInPage() {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <span className="inline-flex items-center gap-2 text-sm font-bold text-success">
-                  <CheckCircle2 className="h-5 w-5" /> Checked In (Demo) · Gate {booking.gate} · Terminal {booking.terminal}
+                  <CheckCircle2 className="h-5 w-5" /> Checked In · Gate {booking.gate} · Terminal {booking.terminal}
                 </span>
                 <Button variant="outline" size="sm" className="gap-1.5 text-destructive" onClick={handleUndoCheckIn}>
                   <Undo2 className="h-3.5 w-3.5" /> {copy.undoCheckIn}
@@ -338,7 +404,7 @@ function CheckInPage() {
                         <div className="text-xs space-y-1 min-w-0">
                           <p className="font-semibold">RLOC: {booking.rloc} · Seq 00{idx + 1}</p>
                           {p.bagTagNumber && <p className="text-muted-foreground">Digital Bag Tag: {p.bagTagNumber}</p>}
-                          {booking.biometricOptIn && <p className="font-semibold text-primary">Biometric Opt-in Recorded (Demo)</p>}
+                          {booking.biometricOptIn && <p className="font-semibold text-primary">Biometric Opt-in Recorded</p>}
                           <p className="truncate font-mono text-xs text-muted-foreground" title={bcbp}>
                             BCBP: {bcbp}
                           </p>

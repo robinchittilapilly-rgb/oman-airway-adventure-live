@@ -2,6 +2,14 @@ import type { FareBrandId } from "./omanAirRoutes";
 
 export type SindbadTier = "Blue" | "Silver" | "Gold";
 
+export interface HouseholdMember {
+  id: string;
+  name: string;
+  relation: string;
+  sindbadNo: string;
+  contributedMiles: number;
+}
+
 export interface AncillaryItem {
   id: string;
   code: string;

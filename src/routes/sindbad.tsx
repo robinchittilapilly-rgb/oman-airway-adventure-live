@@ -8,6 +8,7 @@ import {
   RETRO_CLAIMABLE_PNRS,
   type SindbadTier,
 } from "../data/ancillariesAndSeats";
+import { bffClient } from "../lib/bff-client";
 import { calculateSindbadMiles } from "../lib/ibe-rules";
 import { t } from "../lib/i18n";
 import { Button } from "../components/ui/button";
@@ -18,7 +19,7 @@ export const Route = createFileRoute("/sindbad")({
       { title: "Sindbad Frequent Flyer Portal | Oman Air" },
       { name: "description", content: "Track Sindbad tier status, calculate spend-based miles, pool family miles, retro-claim eligible flights, and redeem rewards." },
       { property: "og:title", content: "Sindbad Loyalty Portal | Oman Air" },
-      { property: "og:description", content: "Oman Air Sindbad frequent flyer dashboard prototype, household pooling, and redemption catalog." },
+      { property: "og:description", content: "Oman Air Sindbad frequent flyer dashboard, household pooling, and redemption catalog." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -28,6 +29,7 @@ export const Route = createFileRoute("/sindbad")({
 
 function SindbadPortalPage() {
   const {
+    bffConnected,
     sindbadSignedIn,
     sindbadMemberName,
     signInSindbad,
@@ -38,7 +40,9 @@ function SindbadPortalPage() {
     tierPoints,
     spendMiles,
     addMiles,
+    syncFromBffUser,
     household,
+    setHouseholdList,
     addHouseholdMember,
     removeHouseholdMember,
     claimedPnrs,
@@ -57,11 +61,22 @@ function SindbadPortalPage() {
   const tierTarget = sindbadTier === "Gold" ? 600 : sindbadTier === "Silver" ? 300 : 150;
   const tierProgressPct = Math.min(100, Math.round((tierPoints / tierTarget) * 100));
 
-  const handleRetroClaim = (e: React.FormEvent) => {
+  const handleRetroClaim = async (e: React.FormEvent) => {
     e.preventDefault();
     const clean = retroPnr.trim().toUpperCase();
     if (!/^[A-Z0-9]{6}$/.test(clean)) {
       toast.error("Enter a valid 6-character Oman Air PNR (e.g. WY5M2K).");
+      return;
+    }
+    if (bffConnected) {
+      try {
+        const res = await bffClient.retroClaim(clean, lang);
+        syncFromBffUser(res.user);
+        setRetroPnr("");
+        toast.success(`BFF LMS validated ${clean}! +${res.milesCredited.toLocaleString()} Sindbad Miles credited.`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Retro-claim failed.");
+      }
       return;
     }
     if (claimedPnrs.includes(clean)) {
@@ -82,7 +97,17 @@ function SindbadPortalPage() {
     toast.success(`Demo LMS match for ${clean}! +${milesToCredit.toLocaleString()} Sindbad Miles credited.`);
   };
 
-  const handleRedeem = (title: string, miles: number) => {
+  const handleRedeem = async (id: string, title: string, miles: number) => {
+    if (bffConnected) {
+      try {
+        const res = await bffClient.redeemCatalog(id, lang);
+        syncFromBffUser(res.user);
+        toast.success(`Redeemed "${title}" via BFF LMS! Voucher: ${res.voucherCode}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Redemption failed.");
+      }
+      return;
+    }
     if (!spendMiles(miles)) {
       toast.error("Insufficient Sindbad miles balance for this reward.");
       return;
@@ -90,9 +115,20 @@ function SindbadPortalPage() {
     toast.success(`Redeemed "${title}" for ${miles.toLocaleString()} miles (Demo Voucher)!`);
   };
 
-  const handleAddFamily = (e: React.FormEvent) => {
+  const handleAddFamily = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!memberName.trim()) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.addHousehold(memberName.trim(), memberRel, lang);
+        setHouseholdList(res.household);
+        setMemberName("");
+        toast.success("Family member linked via BFF LMS.");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not link member.");
+      }
+      return;
+    }
     addHouseholdMember({
       name: memberName.trim(),
       relation: memberRel,
@@ -103,20 +139,33 @@ function SindbadPortalPage() {
     toast.success("Family member linked to your Sindbad Household pool (Demo).");
   };
 
+  const handleRemoveFamily = async (id: string) => {
+    if (bffConnected) {
+      try {
+        const res = await bffClient.removeHousehold(id, lang);
+        setHouseholdList(res.household);
+        return;
+      } catch {
+        // ignore
+      }
+    }
+    removeHouseholdMember(id);
+  };
+
   if (!sindbadSignedIn) {
     return (
       <div className="mx-auto max-w-xl px-4 py-16 sm:px-6">
         <div className="rounded-3xl border border-border bg-card p-8 text-center shadow-sm">
           <Award className="mx-auto h-10 w-10 text-primary" />
-          <h1 className="mt-3 font-display text-2xl font-extrabold">Sign In or Enroll in Sindbad (Demo)</h1>
+          <h1 className="mt-3 font-display text-2xl font-extrabold">Sign In or Enroll in Sindbad</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            You are currently browsing as a Guest. Sign in to view your miles balance, household pool, and saved travelers.
+            You are currently browsing as a Guest. Sign in to sync your miles, household pool, and saved travelers via the BFF.
           </p>
           <form
             onSubmit={(e) => {
               e.preventDefault();
               signInSindbad(enrollName);
-              toast.success(`Signed in as ${enrollName} (Demo session)`);
+              toast.success(`Signed in as ${enrollName}`);
             }}
             className="mt-6 space-y-3 text-start"
           >
@@ -132,7 +181,7 @@ function SindbadPortalPage() {
               />
             </div>
             <Button type="submit" size="lg" className="w-full gap-2 rounded-xl font-display font-bold">
-              <LogIn className="h-4 w-4" /> Continue to Sindbad Portal (Demo)
+              <LogIn className="h-4 w-4" /> Continue to Sindbad Portal
             </Button>
           </form>
         </div>
@@ -142,7 +191,6 @@ function SindbadPortalPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 space-y-8">
-      {/* Loyalty Dashboard Hero Card */}
       <section className="rounded-3xl bg-teal-deep p-6 text-teal-deep-foreground sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
@@ -150,7 +198,9 @@ function SindbadPortalPage() {
               <Award className="h-4 w-4" /> Sindbad Member · oneworld {sindbadTier === "Gold" ? "Sapphire" : sindbadTier === "Silver" ? "Ruby" : "Member"}
             </p>
             <h1 className="mt-2 font-display text-3xl font-extrabold">{sindbadMemberName}</h1>
-            <p className="text-xs opacity-85">Account SB-8841209 · Demo browser session ({copy.title})</p>
+            <p className="text-xs opacity-85">
+              Account SB-8841209 · {bffConnected ? "BFF LMS Connected" : "Local Demo Session"} ({copy.title})
+            </p>
 
             <div className="mt-5 flex flex-wrap gap-2">
               {(["Blue", "Silver", "Gold"] as SindbadTier[]).map((tier) => (
@@ -236,7 +286,7 @@ function SindbadPortalPage() {
             <Sparkles className="h-5 w-5 text-primary" /> {copy.retroTitle}
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Enter an unclaimed PNR from the demo ledger (<code>WY5M2K</code>, <code>WY3P8N</code>, <code>WY2J4Q</code>) or a confirmed booking RLOC.
+            Enter an unclaimed PNR from the ledger (<code>WY5M2K</code>, <code>WY3P8N</code>, <code>WY2J4Q</code>) or a confirmed booking RLOC.
           </p>
           <form onSubmit={handleRetroClaim} className="mt-4 flex gap-2">
             <label htmlFor="sindbad-retro-pnr" className="sr-only">PNR Code</label>
@@ -248,7 +298,7 @@ function SindbadPortalPage() {
               maxLength={6}
               className="h-11 flex-1 rounded-xl border border-input bg-background px-3 text-sm font-bold uppercase"
             />
-            <Button type="submit" className="h-11 rounded-xl font-display font-bold">Check & Claim (Demo)</Button>
+            <Button type="submit" className="h-11 rounded-xl font-display font-bold">Check & Claim</Button>
           </form>
         </section>
       </div>
@@ -264,7 +314,7 @@ function SindbadPortalPage() {
                 <p className="font-bold">{h.name} ({h.relation})</p>
                 <p className="text-muted-foreground">{h.sindbadNo} · +{h.contributedMiles.toLocaleString()} mi</p>
               </div>
-              <button type="button" onClick={() => removeHouseholdMember(h.id)} aria-label={`Remove ${h.name}`} className="text-muted-foreground hover:text-destructive">
+              <button type="button" onClick={() => handleRemoveFamily(h.id)} aria-label={`Remove ${h.name}`} className="text-muted-foreground hover:text-destructive">
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
@@ -288,7 +338,7 @@ function SindbadPortalPage() {
           >
             <option>Spouse</option><option>Child</option><option>Parent</option><option>Sibling</option>
           </select>
-          <Button type="submit" variant="secondary" className="gap-1.5"><Plus className="h-4 w-4" /> Link Member (Demo)</Button>
+          <Button type="submit" variant="secondary" className="gap-1.5"><Plus className="h-4 w-4" /> Link Member</Button>
         </form>
       </section>
 
@@ -306,7 +356,7 @@ function SindbadPortalPage() {
               </div>
               <div className="mt-4 flex items-center justify-between">
                 <span className="font-display text-sm font-extrabold text-primary">{item.miles.toLocaleString()} mi</span>
-                <Button size="sm" onClick={() => handleRedeem(item.title, item.miles)}>Redeem</Button>
+                <Button size="sm" onClick={() => handleRedeem(item.id, item.title, item.miles)}>Redeem</Button>
               </div>
             </div>
           ))}

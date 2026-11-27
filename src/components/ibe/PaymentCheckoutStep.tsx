@@ -24,6 +24,7 @@ interface PaymentCheckoutStepProps {
   onConfirmPay: (details: {
     mode: "pay" | "hold";
     holdHours?: 24 | 48;
+    paymentMethod: PaymentMethodId;
     paymentLabel: string;
     milesUsed: number;
     travelBankUsedOMR: number;
@@ -64,6 +65,7 @@ export function PaymentCheckoutStep({
       onConfirmPay({
         mode: "hold",
         holdHours,
+        paymentMethod: method,
         paymentLabel: `Hold My Fare (${holdHours}h Guarantee · Demo)`,
         milesUsed: 0,
         travelBankUsedOMR: 0,
@@ -84,6 +86,7 @@ export function PaymentCheckoutStep({
 
     onConfirmPay({
       mode: "pay",
+      paymentMethod: method,
       paymentLabel: label,
       milesUsed: milesToBurn,
       travelBankUsedOMR: bankOffsetOMR,

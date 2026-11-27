@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Gift,
+  QrCode,
   RefreshCw,
   Scissors,
   Search,
@@ -21,6 +22,7 @@ import {
   get30DayFareRepository,
   getDateISO,
 } from "../data/omanAirRoutes";
+import { bffClient } from "../lib/bff-client";
 import {
   computeExchangeQuote,
   computeRefundQuote,
@@ -47,11 +49,13 @@ export const Route = createFileRoute("/manage")({
 
 function ManageBookingPage() {
   const {
+    bffConnected,
     bookings,
     updateBooking,
     addBooking,
     addTravelBank,
     spendMiles,
+    syncFromBffUser,
     sindbadMiles,
     sindbadSignedIn,
     currency,
@@ -66,6 +70,7 @@ function ManageBookingPage() {
   const [newDate, setNewDate] = useState(getDateISO(5));
   const [bidAmount, setBidAmount] = useState("95");
   const [payAddonsWithMiles, setPayAddonsWithMiles] = useState(false);
+  const [handoffToken, setHandoffToken] = useState<string | null>(null);
 
   const booking = bookings.find((b) => b.rloc.toUpperCase() === activeRloc.toUpperCase());
   const holdExpired = booking?.status === "HELD" && isHoldExpired(booking.holdExpiresAt);
@@ -86,12 +91,23 @@ function ManageBookingPage() {
     });
   })();
 
-  const handleLookup = (e: React.FormEvent) => {
+  const handleLookup = async (e: React.FormEvent) => {
     e.preventDefault();
     const rlocClean = rlocInput.trim().toUpperCase();
     const lastClean = lastNameInput.trim().toUpperCase();
     if (!rlocClean || !lastClean) {
       toast.error("Please enter both your 6-character RLOC and passenger last name.");
+      return;
+    }
+    if (bffConnected) {
+      try {
+        const res = await bffClient.retrieveBooking(rlocClean, lastClean, lang);
+        addBooking(res.booking);
+        setActiveRloc(res.booking.rloc);
+        toast.success(`Retrieved PNR ${res.booking.rloc} via BFF`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Booking not found.");
+      }
       return;
     }
     const found = bookings.find(
@@ -107,8 +123,18 @@ function ManageBookingPage() {
     toast.success(`Retrieved PNR ${found.rloc}`);
   };
 
-  const handleSettleHold = () => {
+  const handleSettleHold = async () => {
     if (!booking || holdExpired) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.settleHold(booking.rloc, lang);
+        addBooking(res.booking);
+        toast.success(`Held PNR ${booking.rloc} ticketed via BFF!`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not settle hold.");
+      }
+      return;
+    }
     updateBooking(booking.rloc, (prev) => ({
       ...prev,
       status: "CONFIRMED",
@@ -117,8 +143,24 @@ function ManageBookingPage() {
     toast.success(`Held PNR ${booking.rloc} ticketed and confirmed!`);
   };
 
-  const handleIrropsRebook = (flightNo: string, depTime: string, arrTime: string) => {
+  const handleIrropsRebook = async (flightNo: string, depTime: string, arrTime: string) => {
     if (!booking) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.applyIrrops(booking.rloc, {
+          action: "rebook",
+          flightNumber: flightNo,
+          departureTime: depTime,
+          arrivalTime: arrTime,
+        }, lang);
+        addBooking(res.booking);
+        syncFromBffUser(res.user);
+        toast.success(`Complimentary IRROPS re-accommodation confirmed onto ${flightNo} via BFF!`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "IRROPS rebook failed.");
+      }
+      return;
+    }
     updateBooking(booking.rloc, (prev) => {
       const { disruptionNote: _removed, ...rest } = prev;
       return {
@@ -132,15 +174,38 @@ function ManageBookingPage() {
     toast.success(`Complimentary IRROPS re-accommodation confirmed onto ${flightNo}!`);
   };
 
-  const handleIrropsVoucher = () => {
+  const handleIrropsVoucher = async () => {
     if (!booking) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.applyIrrops(booking.rloc, { action: "voucher" }, lang);
+        addBooking(res.booking);
+        syncFromBffUser(res.user);
+        toast.success("Hotel + Meal Voucher & Travel Bank credit recorded via BFF!");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Voucher failed.");
+      }
+      return;
+    }
     addTravelBank(booking.totalPaidOMR + 25);
     updateBooking(booking.rloc, (prev) => ({ ...prev, status: "VOUCHERED" }));
     toast.success("Hotel + Meal Voucher & Travel Bank credit recorded (Demo)!");
   };
 
-  const handleDateExchange = () => {
+  const handleDateExchange = async () => {
     if (!booking || !exchangeQuote) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.exchangeBooking(booking.rloc, newDate, lang);
+        addBooking(res.booking);
+        toast.success(
+          `Flight exchanged via BFF to ${newDate} (Fee ${formatMoney(res.quote.changeFeeOMR, currency)} + Fare diff ${formatMoney(res.quote.fareDifferenceOMR, currency)}).`
+        );
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Exchange failed.");
+      }
+      return;
+    }
     updateBooking(booking.rloc, (prev) => ({
       ...prev,
       dateISO: newDate,
@@ -151,8 +216,19 @@ function ManageBookingPage() {
     );
   };
 
-  const handlePostTicketingAdd = (label: string, priceOMR: number) => {
+  const handlePostTicketingAdd = async (label: string, priceOMR: number) => {
     if (!booking) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.addBookingAncillary(booking.rloc, label, priceOMR, payAddonsWithMiles, lang);
+        addBooking(res.booking);
+        syncFromBffUser(res.user);
+        toast.success(`Add-on recorded via BFF: ${label}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Add-on failed.");
+      }
+      return;
+    }
     const milesCost = priceOMR * 400;
     if (payAddonsWithMiles && priceOMR > 0) {
       if (!sindbadSignedIn || !spendMiles(milesCost)) {
@@ -174,8 +250,19 @@ function ManageBookingPage() {
     toast.success(`Demo add-on recorded for ${label} (${formatMoney(priceOMR, currency)}).`);
   };
 
-  const handleMilesUpgrade = () => {
+  const handleMilesUpgrade = async () => {
     if (!booking || !milesUpgrade?.eligible || !milesUpgrade.targetBrand) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.upgradeBookingWithMiles(booking.rloc, lang);
+        addBooking(res.booking);
+        syncFromBffUser(res.user);
+        toast.success(`Upgraded to ${FARE_BRANDS[res.booking.fareBrand].name} via BFF!`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Miles upgrade failed.");
+      }
+      return;
+    }
     if (!sindbadSignedIn) {
       toast.error("Sign in to Sindbad to redeem a miles upgrade.");
       return;
@@ -193,8 +280,19 @@ function ManageBookingPage() {
     toast.success(`Upgraded to ${FARE_BRANDS[nextBrand].name} for ${milesUpgrade.milesRequired.toLocaleString()} Sindbad miles!`);
   };
 
-  const handleSplitPnr = () => {
+  const handleSplitPnr = async () => {
     if (!booking || booking.passengers.length < 2) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.splitBooking(booking.rloc, lang);
+        addBooking(res.parent);
+        addBooking(res.child);
+        toast.success(`Split PNR complete via BFF! Child RLOC: ${res.child.rloc}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Split PNR failed.");
+      }
+      return;
+    }
     const paxCount = booking.passengers.length;
     const splitShare = Math.round(booking.totalPaidOMR / paxCount);
     const remainingShare = Math.max(0, booking.totalPaidOMR - splitShare);
@@ -215,8 +313,23 @@ function ManageBookingPage() {
     toast.success(`Split PNR complete! ${splitPax.firstName} moved to ${childRloc} (${formatMoney(splitShare, currency)}).`);
   };
 
-  const handleRefund = (toVoucher: boolean) => {
+  const handleRefund = async (toVoucher: boolean) => {
     if (!booking || !refundQuote) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.refundBooking(booking.rloc, toVoucher, lang);
+        addBooking(res.booking);
+        syncFromBffUser(res.user);
+        toast.success(
+          toVoucher
+            ? `${formatMoney(res.quote.voucherRefundOMR, currency)} credited to Travel Bank via BFF.`
+            : `Refund of ${formatMoney(res.quote.cashRefundOMR, currency)} processed via BFF.`
+        );
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Refund failed.");
+      }
+      return;
+    }
     if (toVoucher) {
       addTravelBank(refundQuote.voucherRefundOMR);
       updateBooking(booking.rloc, (prev) => ({ ...prev, status: "VOUCHERED" }));
@@ -231,9 +344,33 @@ function ManageBookingPage() {
     }
   };
 
+  const handleGenerateHandoff = async () => {
+    if (!booking) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.createHandoffToken(booking.rloc, "checkin", lang);
+        setHandoffToken(res.token);
+        toast.success(`Cross-channel handoff token issued: ${res.token}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not issue handoff token.");
+      }
+      return;
+    }
+    const localToken = `hoff_${booking.rloc}_${Date.now().toString(36)}`;
+    setHandoffToken(localToken);
+    toast.success(`Demo handoff token: ${localToken}`);
+  };
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-      <h1 className="font-display text-3xl font-extrabold">{copy.title}</h1>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="font-display text-3xl font-extrabold">{copy.title}</h1>
+        {bffConnected && (
+          <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
+            BFF Connected
+          </span>
+        )}
+      </div>
       <p className="mt-1 text-sm text-muted-foreground">{copy.subtitle}</p>
 
       {/* Retrieval Bar requiring RLOC + Last Name */}
@@ -285,7 +422,6 @@ function ManageBookingPage() {
 
       {booking && (
         <div className="mt-6 space-y-6">
-          {/* Hold Expiry Banner (FR-74) */}
           {booking.status === "HELD" && (
             <div className={`rounded-2xl border-2 p-5 ${holdExpired ? "border-destructive bg-destructive/5" : "border-gold bg-gold/10"}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -306,14 +442,13 @@ function ManageBookingPage() {
             </div>
           )}
 
-          {/* IRROPS Banner */}
           {booking.status === "DISRUPTED_CXL" && (
             <div className="rounded-2xl border-2 border-destructive bg-destructive/5 p-6">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="mt-0.5 h-6 w-6 text-destructive" />
                 <div className="flex-1">
                   <h2 className="font-display text-xl font-bold text-destructive">
-                    Involuntary Flight Disruption — Fee Waiver Active (Demo)
+                    Involuntary Flight Disruption — Fee Waiver Active
                   </h2>
                   <p className="mt-1 text-sm text-foreground">{booking.disruptionNote}</p>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
@@ -340,9 +475,9 @@ function ManageBookingPage() {
                       onClick={handleIrropsVoucher}
                       className="rounded-xl border border-gold bg-gold/15 p-3.5 text-start hover:bg-gold/25"
                     >
-                      <p className="text-xs font-bold">Option 3 · Care Voucher (Demo)</p>
+                      <p className="text-xs font-bold">Option 3 · Care Voucher</p>
                       <p className="mt-1 font-display text-base font-bold">Hotel + Meal + Travel Bank Credit</p>
-                      <p className="text-xs text-muted-foreground">Instant demo voucher</p>
+                      <p className="text-xs text-muted-foreground">Instant voucher</p>
                     </button>
                   </div>
                 </div>
@@ -350,7 +485,6 @@ function ManageBookingPage() {
             </div>
           )}
 
-          {/* Summary Header */}
           <div className="rounded-2xl border border-border bg-card p-6">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
               <div>
@@ -377,6 +511,9 @@ function ManageBookingPage() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={handleGenerateHandoff}>
+                  <QrCode className="h-3.5 w-3.5" /> Mobile Handoff Token
+                </Button>
                 {booking.status === "CONFIRMED" && (
                   <Button asChild variant="secondary" size="sm" className="gap-1.5">
                     <Link to="/sindbad">
@@ -392,6 +529,12 @@ function ManageBookingPage() {
               </div>
             </div>
 
+            {handoffToken && (
+              <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
+                Cross-Channel Handoff Token (FR-49): <code className="font-bold">{handoffToken}</code> (valid 15 min)
+              </div>
+            )}
+
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Passengers & Seats</h3>
@@ -402,13 +545,13 @@ function ManageBookingPage() {
                         <p className="font-bold">{p.firstName} {p.lastName} <span className="text-muted-foreground">({p.type})</span></p>
                         <p className="text-muted-foreground">Passport: {p.passport} · Seat {p.seat}</p>
                       </div>
-                      <span className="font-semibold text-primary">{p.checkedIn ? "Checked In" : "Ticketed (Demo)"}</span>
+                      <span className="font-semibold text-primary">{p.checkedIn ? "Checked In" : "Ticketed"}</span>
                     </div>
                   ))}
                 </div>
               </div>
               <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Add-ons & SSR Status (Demo)</h3>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Add-ons & SSR Status</h3>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {booking.ancillaries.map((a) => (
                     <span key={a} className="inline-flex items-center gap-1 rounded-full bg-secondary px-3 py-1 text-xs font-semibold">
@@ -425,9 +568,7 @@ function ManageBookingPage() {
             </div>
           </div>
 
-          {/* Self-Service Action Cards */}
           <div className="grid gap-4 md:grid-cols-3">
-            {/* Flight Exchange */}
             <div className="rounded-2xl border border-border bg-card p-5">
               <h3 className="flex items-center gap-2 font-display text-base font-bold">
                 <CalendarClock className="h-4 w-4 text-primary" /> {copy.exchangeTitle}
@@ -453,7 +594,6 @@ function ManageBookingPage() {
               <Button className="mt-3 w-full" onClick={handleDateExchange}>{copy.confirmExchange}</Button>
             </div>
 
-            {/* Post-Ticketing Shop & Miles Upgrade (FR-104, FR-107, FR-125) */}
             <div className="rounded-2xl border border-border bg-card p-5">
               <h3 className="flex items-center gap-2 font-display text-base font-bold">
                 <ShoppingBag className="h-4 w-4 text-primary" /> {copy.shopTitle}
@@ -508,7 +648,6 @@ function ManageBookingPage() {
               </div>
             </div>
 
-            {/* Voluntary Refund / Voucher enforcing fare brand rules */}
             <div className="rounded-2xl border border-border bg-card p-5">
               <h3 className="flex items-center gap-2 font-display text-base font-bold">
                 <RefreshCw className="h-4 w-4 text-primary" /> {copy.refundTitle}
