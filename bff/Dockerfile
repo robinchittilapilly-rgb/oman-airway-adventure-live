@@ -12,6 +12,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist-bff ./dist-bff
+COPY --from=builder /app/bff/stores/schema.sql ./dist-bff/schema.sql
 ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { SindbadTier } from "../../src/data/ancillariesAndSeats";
 import type { PointOfSale } from "../types";
 
@@ -20,7 +21,11 @@ export interface PartnerSsoToken {
  * Keeps vendor keys, dynamic price overlays, and partner SSO handoffs strictly inside the BFF.
  */
 export class ThirdPartyIntegrationHub {
-  quoteInsurance(params: { pos: PointOfSale; tier: SindbadTier; isLongHaul: boolean }): InsuranceQuote {
+  quoteInsurance(params: {
+    pos: PointOfSale;
+    tier: SindbadTier;
+    isLongHaul: boolean;
+  }): InsuranceQuote {
     const basePriceOMR = params.isLongHaul ? 14 : 10;
     let multiplier = 1.0;
     let overlayTag: string | undefined;
@@ -42,7 +47,7 @@ export class ThirdPartyIntegrationHub {
   }
 
   issuePartnerSsoHandoff(partner: string, memberId?: string): PartnerSsoToken {
-    const token = `sso_${Math.random().toString(36).slice(2, 12)}`;
+    const token = `sso_${randomUUID()}`;
     return {
       partner,
       handoffToken: token,
@@ -51,14 +56,14 @@ export class ThirdPartyIntegrationHub {
     };
   }
 
-  authorizePaymentIntent(params: {
-    amountOMR: number;
-    method: string;
-    sessionId: string;
-  }): { approved: boolean; gatewayRef: string; riskScore: number } {
+  authorizePaymentIntent(params: { amountOMR: number; method: string; sessionId: string }): {
+    approved: boolean;
+    gatewayRef: string;
+    riskScore: number;
+  } {
     return {
       approved: true,
-      gatewayRef: `PG-${Date.now().toString(36).toUpperCase()}`,
+      gatewayRef: `PG-${randomUUID().slice(0, 12).toUpperCase()}`,
       riskScore: 12,
     };
   }

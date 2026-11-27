@@ -31,6 +31,16 @@ const ERROR_CATALOG: Record<string, { en: string; ar: string; retryable: boolean
     ar: "يرجى تسجيل الدخول إلى حساب سندباد لإتمام هذه العملية.",
     retryable: false,
   },
+  ERR_FORBIDDEN: {
+    en: "You are not authorized to view or modify this booking or resource.",
+    ar: "غير مصرح لك بعرض هذا الحجز أو تعديله.",
+    retryable: false,
+  },
+  ERR_CONFLICT: {
+    en: "A request with this Idempotency-Key is already in progress or used a different payload.",
+    ar: "يوجد طلب مطابق قيد المعالجة بالفعل أو ببيانات مختلفة.",
+    retryable: true,
+  },
   ERR_INSUFFICIENT_MILES: {
     en: "Your Sindbad miles balance is insufficient for this selection.",
     ar: "رصيد أميال سندباد غير كافٍ لإتمام هذا الاختيار.",
@@ -62,7 +72,7 @@ export class BffAppError extends Error {
   constructor(
     public readonly code: string,
     public readonly statusCode: number = 400,
-    public readonly overrideMessage?: string
+    public readonly overrideMessage?: string,
   ) {
     super(overrideMessage ?? code);
   }
@@ -71,7 +81,11 @@ export class BffAppError extends Error {
 /**
  * Intercepts technical PSS/adapter codes and translates them into friendly, localized messages (FR-46).
  */
-export function translateBffError(code: string, lang: AppLang = "en", overrideMessage?: string): BffErrorPayload {
+export function translateBffError(
+  code: string,
+  lang: AppLang = "en",
+  overrideMessage?: string,
+): BffErrorPayload {
   const entry = ERROR_CATALOG[code] ?? ERROR_CATALOG["ERR_INTERNAL"]!;
   return {
     code,

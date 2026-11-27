@@ -4,7 +4,8 @@ export const UI_TEXT = {
   en: {
     brandFooterTitle: "OMAN AIR · الطيران العماني",
     brandFooterSub: "Member of the oneworld Alliance · Hub: Muscat International Airport (MCT)",
-    brandFooterNote: "Interactive Web IBE Prototype · Synthetic 20-Route 30-Day Data · Simulated PSS & Payment Flows",
+    brandFooterNote:
+      "Interactive Web IBE Prototype · Synthetic 20-Route 30-Day Data · Simulated PSS & Payment Flows",
     nav: {
       book: "Book",
       manage: "Manage",
@@ -50,7 +51,8 @@ export const UI_TEXT = {
     },
     sindbad: {
       title: "Sindbad Frequent Flyer Portal",
-      subtitle: "Track tier status, calculate miles, pool family miles, retro-claim eligible PNRs, and redeem rewards.",
+      subtitle:
+        "Track tier status, calculate miles, pool family miles, retro-claim eligible PNRs, and redeem rewards.",
       retroTitle: "Claim Missing Miles (Retro-Claim)",
       familyTitle: "Family & Household Miles Pooling",
       catalogTitle: "Non-Flight Partner Redemption Catalog",
@@ -67,7 +69,8 @@ export const UI_TEXT = {
   ar: {
     brandFooterTitle: "الطيران العُماني · OMAN AIR",
     brandFooterSub: "عضو تحالف oneworld · المركز الرئيسي: مطار مسقط الدولي (MCT)",
-    brandFooterNote: "نموذج أولي لمحرك الحجز الإلكتروني · بيانات تجريبية لـ 20 وجهة · محاكاة أنظمة الحجز والدفع",
+    brandFooterNote:
+      "نموذج أولي لمحرك الحجز الإلكتروني · بيانات تجريبية لـ 20 وجهة · محاكاة أنظمة الحجز والدفع",
     nav: {
       book: "احجز",
       manage: "إدارة الحجز",
@@ -112,7 +115,8 @@ export const UI_TEXT = {
     },
     sindbad: {
       title: "بوابة برنامج الولاء سندباد",
-      subtitle: "تتبع الفئة، احسب الأميال، اجمع أميال العائلة، طالب بالأميال المفقودة واستبدل المكافآت.",
+      subtitle:
+        "تتبع الفئة، احسب الأميال، اجمع أميال العائلة، طالب بالأميال المفقودة واستبدل المكافآت.",
       retroTitle: "المطالبة بالأميال المفقودة",
       familyTitle: "تجميع أميال العائلة والأسرة",
       catalogTitle: "كتالوج استبدال المكافآت",

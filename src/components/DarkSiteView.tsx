@@ -9,14 +9,24 @@ import { OmanAirLogo } from "./OmanAirLogo";
  * FR-31 & FR-32: Lightweight Dark Site mode template (demo).
  */
 export function DarkSiteView() {
-  const { setDarkSiteMode, lang } = useIBE();
+  const { setDarkSiteMode, lang, cmsState } = useIBE();
   const [flightQuery, setFlightQuery] = useState("WY 603");
   const copy = t(lang).darkSite;
+  const titleText =
+    lang === "ar"
+      ? (cmsState?.darkSiteHeadlineAr ?? copy.title)
+      : (cmsState?.darkSiteHeadlineEn ?? copy.title);
+  const advisoryText =
+    lang === "ar"
+      ? (cmsState?.darkSiteAdvisoryAr ??
+        "تنبيه تجريبي · بسبب الأحوال الجوية قرب دبي (DXB)، قد تتأثر بعض الرحلات الإقليمية مثل WY 603. رسوم إعادة الحجز معفاة للمسافرين المتأثرين.")
+      : (cmsState?.darkSiteAdvisoryEn ??
+        "Demo Advisory · Due to severe weather cells near Dubai (DXB), select regional departures including WY 603 are subject to schedule adjustments. All rebooking fees are waived for affected passengers.");
 
   const match = OMAN_AIR_20_ROUTES.find(
     (r) =>
       r.flightNumber.replace(/\s+/g, "").toUpperCase() ===
-      flightQuery.replace(/\s+/g, "").toUpperCase()
+      flightQuery.replace(/\s+/g, "").toUpperCase(),
   );
 
   return (
@@ -28,7 +38,7 @@ export function DarkSiteView() {
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-gold" />
               <div>
-                <p className="font-display text-base font-bold tracking-wider">{copy.title}</p>
+                <p className="font-display text-base font-bold tracking-wider">{titleText}</p>
                 <p className="text-xs opacity-85">{copy.subtitle}</p>
               </div>
             </div>
@@ -47,11 +57,7 @@ export function DarkSiteView() {
       <main className="mx-auto max-w-4xl space-y-6 px-4 py-8">
         <section className="rounded-lg border border-destructive/40 bg-destructive/5 p-5">
           <h1 className="font-display text-xl font-bold">{copy.advisoryHeading}</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {lang === "ar"
-              ? "تنبيه تجريبي · بسبب الأحوال الجوية قرب دبي (DXB)، قد تتأثر بعض الرحلات الإقليمية مثل WY 603. رسوم إعادة الحجز معفاة للمسافرين المتأثرين."
-              : "Demo Advisory · Due to severe weather cells near Dubai (DXB), select regional departures including WY 603 are subject to schedule adjustments. All rebooking fees are waived for affected passengers."}
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">{advisoryText}</p>
         </section>
 
         <section className="rounded-lg border border-border bg-card p-5">
@@ -78,13 +84,19 @@ export function DarkSiteView() {
               </p>
               <p className="mt-1 text-muted-foreground">
                 Scheduled {match.departureTime} – {match.arrivalTime} · Status:{" "}
-                <strong className={match.flightNumber === "WY 603" ? "text-destructive" : "text-success"}>
-                  {match.flightNumber === "WY 603" ? "DISRUPTED — Free Rebooking Active (Demo)" : "ON TIME (Demo)"}
+                <strong
+                  className={match.flightNumber === "WY 603" ? "text-destructive" : "text-success"}
+                >
+                  {match.flightNumber === "WY 603"
+                    ? "DISRUPTED — Free Rebooking Active (Demo)"
+                    : "ON TIME (Demo)"}
                 </strong>
               </p>
             </div>
           ) : (
-            <p className="mt-3 text-sm text-muted-foreground">Enter an Oman Air flight number (e.g. WY 101, WY 603, WY 817).</p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Enter an Oman Air flight number (e.g. WY 101, WY 603, WY 817).
+            </p>
           )}
         </section>
 

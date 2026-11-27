@@ -16,6 +16,8 @@ export interface PassengerFormData {
   dob: string;
   gender: string;
   passport: string;
+  passportExpiry?: string | undefined;
+  issuingCountry?: string | undefined;
   nationality: string;
   email: string;
   phone: string;
@@ -65,7 +67,11 @@ export function PassengerFormStep({ passengers, travelDateISO, onChange }: Passe
   return (
     <div className="space-y-5">
       {passengers.map((p, idx) => {
-        const icaoCheck = validateIcaoPassenger({ firstName: p.firstName, lastName: p.lastName, passport: p.passport });
+        const icaoCheck = validateIcaoPassenger({
+          firstName: p.firstName,
+          lastName: p.lastName,
+          passport: p.passport,
+        });
         const ageCheck = validatePassengerAgeForType(p.dob, p.role, travelDateISO);
         const valid = icaoCheck.valid && ageCheck.valid;
         const firstError = icaoCheck.errors[0] ?? ageCheck.error;
@@ -110,7 +116,9 @@ export function PassengerFormStep({ passengers, travelDateISO, onChange }: Passe
                     ))}
                   </select>
                 ) : (
-                  <span className="text-xs text-muted-foreground">Guest checkout (sign in to use Saved Travelers)</span>
+                  <span className="text-xs text-muted-foreground">
+                    Guest checkout (sign in to use Saved Travelers)
+                  </span>
                 )}
 
                 <Button
@@ -190,6 +198,33 @@ export function PassengerFormStep({ passengers, travelDateISO, onChange }: Passe
                 </select>
               </div>
               <div>
+                <label
+                  htmlFor={`pax-${idx}-nationality`}
+                  className="mb-1 block text-xs font-semibold"
+                >
+                  Nationality (APIS)
+                </label>
+                <input
+                  id={`pax-${idx}-nationality`}
+                  value={p.nationality}
+                  onChange={(e) => onChange(idx, { nationality: e.target.value })}
+                  placeholder="Oman"
+                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                />
+              </div>
+              <div>
+                <label htmlFor={`pax-${idx}-expiry`} className="mb-1 block text-xs font-semibold">
+                  Passport Expiry Date
+                </label>
+                <input
+                  id={`pax-${idx}-expiry`}
+                  type="date"
+                  value={p.passportExpiry ?? "2030-05-14"}
+                  onChange={(e) => onChange(idx, { passportExpiry: e.target.value })}
+                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                />
+              </div>
+              <div>
                 <label htmlFor={`pax-${idx}-sindbad`} className="mb-1 block text-xs font-semibold">
                   Sindbad FFP Number (Optional)
                 </label>
@@ -206,7 +241,9 @@ export function PassengerFormStep({ passengers, travelDateISO, onChange }: Passe
             {idx === 0 && (
               <div className="mt-4 grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
-                  <label htmlFor={`pax-${idx}-email`} className="mb-1 block text-xs font-semibold">Contact Email</label>
+                  <label htmlFor={`pax-${idx}-email`} className="mb-1 block text-xs font-semibold">
+                    Contact Email
+                  </label>
                   <input
                     id={`pax-${idx}-email`}
                     type="email"
@@ -217,7 +254,9 @@ export function PassengerFormStep({ passengers, travelDateISO, onChange }: Passe
                   />
                 </div>
                 <div>
-                  <label htmlFor={`pax-${idx}-phone`} className="mb-1 block text-xs font-semibold">Mobile Phone</label>
+                  <label htmlFor={`pax-${idx}-phone`} className="mb-1 block text-xs font-semibold">
+                    Mobile Phone
+                  </label>
                   <input
                     id={`pax-${idx}-phone`}
                     value={p.phone}
@@ -227,7 +266,12 @@ export function PassengerFormStep({ passengers, travelDateISO, onChange }: Passe
                   />
                 </div>
                 <div>
-                  <label htmlFor={`pax-${idx}-emg-name`} className="mb-1 block text-xs font-semibold">Emergency Contact Name</label>
+                  <label
+                    htmlFor={`pax-${idx}-emg-name`}
+                    className="mb-1 block text-xs font-semibold"
+                  >
+                    Emergency Contact Name
+                  </label>
                   <input
                     id={`pax-${idx}-emg-name`}
                     value={p.emergencyName}
@@ -237,7 +281,12 @@ export function PassengerFormStep({ passengers, travelDateISO, onChange }: Passe
                   />
                 </div>
                 <div>
-                  <label htmlFor={`pax-${idx}-emg-phone`} className="mb-1 block text-xs font-semibold">Emergency Phone</label>
+                  <label
+                    htmlFor={`pax-${idx}-emg-phone`}
+                    className="mb-1 block text-xs font-semibold"
+                  >
+                    Emergency Phone
+                  </label>
                   <input
                     id={`pax-${idx}-emg-phone`}
                     value={p.emergencyPhone}

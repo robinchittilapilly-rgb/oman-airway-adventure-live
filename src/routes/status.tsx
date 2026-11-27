@@ -11,9 +11,16 @@ export const Route = createFileRoute("/status")({
   head: () => ({
     meta: [
       { title: "Flight Status & Timetable | Oman Air" },
-      { name: "description", content: "Check Oman Air flight status, terminal, gate, and timetable across 20 routes via BFF cache." },
+      {
+        name: "description",
+        content:
+          "Check Oman Air flight status, terminal, gate, and timetable across 20 routes via BFF cache.",
+      },
       { property: "og:title", content: "Flight Status | Oman Air" },
-      { property: "og:description", content: "Oman Air departures, arrivals, and 20-route timetable via BFF cache." },
+      {
+        property: "og:description",
+        content: "Oman Air departures, arrivals, and 20-route timetable via BFF cache.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -25,7 +32,9 @@ function FlightStatusPage() {
   const [query, setQuery] = useState("");
   const { lang, bffConnected } = useIBE();
   const copy = t(lang).status;
-  const [bffItems, setBffItems] = useState<(typeof OMAN_AIR_20_ROUTES[number] & { gate: string; status: string })[] | null>(null);
+  const [bffItems, setBffItems] = useState<
+    ((typeof OMAN_AIR_20_ROUTES)[number] & { gate: string; status: string })[] | null
+  >(null);
   const [bffCached, setBffCached] = useState(false);
 
   useEffect(() => {
@@ -53,11 +62,7 @@ function FlightStatusPage() {
     ...r,
     gate: `T1 · A${10 + (idx % 12)}`,
     status:
-      r.flightNumber === "WY 603"
-        ? "DISRUPTED (IRROPS)"
-        : idx % 5 === 1
-          ? "BOARDING"
-          : "ON TIME",
+      r.flightNumber === "WY 603" ? "DISRUPTED (IRROPS)" : idx % 5 === 1 ? "BOARDING" : "ON TIME",
   })).filter((r) => {
     const q = query.trim().toUpperCase();
     if (!q) return true;
@@ -86,7 +91,9 @@ function FlightStatusPage() {
           <p className="mt-1 text-sm text-muted-foreground">{copy.subtitle}</p>
         </div>
         <div className="relative w-full sm:w-72">
-          <label htmlFor="status-search" className="sr-only">Filter flights</label>
+          <label htmlFor="status-search" className="sr-only">
+            Filter flights
+          </label>
           <Search className="pointer-events-none absolute start-3 top-3 h-4 w-4 text-muted-foreground" />
           <input
             id="status-search"
@@ -114,12 +121,11 @@ function FlightStatusPage() {
           <tbody className="divide-y divide-border">
             {rows.map((r) => {
               const dest = AIRPORTS.find((a) => a.code === r.destination);
-              const cls =
-                r.status.startsWith("DISRUPTED")
-                  ? "bg-destructive/15 text-destructive"
-                  : r.status === "BOARDING"
-                    ? "bg-gold/25 text-foreground"
-                    : "bg-success/15 text-success";
+              const cls = r.status.startsWith("DISRUPTED")
+                ? "bg-destructive/15 text-destructive"
+                : r.status === "BOARDING"
+                  ? "bg-gold/25 text-foreground"
+                  : "bg-success/15 text-success";
               return (
                 <tr key={r.id} className="hover:bg-muted/30">
                   <td className="px-4 py-3 font-display font-bold text-primary">
@@ -127,7 +133,10 @@ function FlightStatusPage() {
                     {r.flightNumber}
                   </td>
                   <td className="px-4 py-3 font-semibold">
-                    MCT → {r.destination} <span className="text-xs text-muted-foreground">({lang === "ar" ? dest?.cityAr : dest?.city})</span>
+                    MCT → {r.destination}{" "}
+                    <span className="text-xs text-muted-foreground">
+                      ({lang === "ar" ? dest?.cityAr : dest?.city})
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-xs">
                     {r.departureTime} – {r.arrivalTime} ({formatDuration(r.durationMinutes)})
@@ -140,7 +149,12 @@ function FlightStatusPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-end">
-                    <Button asChild variant="ghost" size="sm" className="text-xs font-bold text-primary">
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs font-bold text-primary"
+                    >
                       <Link to={r.flightNumber === "WY 603" ? "/manage" : "/"}>
                         {r.flightNumber === "WY 603" ? "Rebook Free" : "Book"}
                       </Link>

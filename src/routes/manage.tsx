@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
@@ -23,6 +23,7 @@ import {
   getDateISO,
 } from "../data/omanAirRoutes";
 import { bffClient } from "../lib/bff-client";
+import { trackIbeEvent } from "../lib/analytics";
 import {
   computeExchangeQuote,
   computeRefundQuote,
@@ -31,15 +32,24 @@ import {
   isHoldExpired,
 } from "../lib/ibe-rules";
 import { t } from "../lib/i18n";
+import { ScannableQrCode } from "../components/ibe/ScannableQrCode";
 import { Button } from "../components/ui/button";
 
 export const Route = createFileRoute("/manage")({
   head: () => ({
     meta: [
       { title: "Manage My Booking & IRROPS | Oman Air" },
-      { name: "description", content: "Retrieve your Oman Air booking, rebook disrupted flights, add bags or miles upgrades, split PNR, or request refunds." },
+      {
+        name: "description",
+        content:
+          "Retrieve your Oman Air booking, rebook disrupted flights, add bags or miles upgrades, split PNR, or request refunds.",
+      },
       { property: "og:title", content: "Manage My Booking | Oman Air" },
-      { property: "og:description", content: "Self-service Oman Air booking management, IRROPS re-accommodation, upgrades, and refunds." },
+      {
+        property: "og:description",
+        content:
+          "Self-service Oman Air booking management, IRROPS re-accommodation, upgrades, and refunds.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -65,22 +75,105 @@ function ManageBookingPage() {
 
   const initialBooking = bookings[0];
   const [rlocInput, setRlocInput] = useState(initialBooking?.rloc ?? "WY7K9M");
-  const [lastNameInput, setLastNameInput] = useState(initialBooking?.passengers[0]?.lastName ?? "ALBALUSHI");
+  const [lastNameInput, setLastNameInput] = useState(
+    initialBooking?.passengers[0]?.lastName ?? "ALBALUSHI",
+  );
   const [activeRloc, setActiveRloc] = useState<string>(initialBooking?.rloc ?? "WY7K9M");
   const [newDate, setNewDate] = useState(getDateISO(5));
   const [bidAmount, setBidAmount] = useState("95");
   const [payAddonsWithMiles, setPayAddonsWithMiles] = useState(false);
   const [handoffToken, setHandoffToken] = useState<string | null>(null);
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editSindbad, setEditSindbad] = useState("");
+
+  useEffect(() => {
+    if (!bffConnected || typeof window === "undefined") return;
+    const token = new URLSearchParams(window.location.search).get("handoff")?.trim();
+    if (!token) return;
+    bffClient
+      .consumeHandoff(token, lang)
+      .then((res) => {
+        addBooking(res.booking);
+        setActiveRloc(res.booking.rloc);
+        toast.success(`Resumed MMB via cross-channel handoff (${res.booking.rloc})`);
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : "Handoff token expired.");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bffConnected]);
 
   const booking = bookings.find((b) => b.rloc.toUpperCase() === activeRloc.toUpperCase());
+  const bookingRloc = booking?.rloc;
+  const bookingContactEmail = booking?.contactEmail ?? "";
+  const bookingContactPhone = booking?.contactPhone ?? "";
+  const bookingFirstSindbad = booking?.passengers[0]?.sindbadNo ?? "";
+
+  useEffect(() => {
+    if (!bookingRloc) return;
+    setEditEmail(bookingContactEmail);
+    setEditPhone(bookingContactPhone);
+    setEditSindbad(bookingFirstSindbad);
+  }, [bookingRloc, bookingContactEmail, bookingContactPhone, bookingFirstSindbad]);
+
+  const handleSaveServicing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!booking) return;
+    if (bffConnected) {
+      try {
+        const res = await bffClient.updatePnrServicing(
+          booking.rloc,
+          {
+            ...(editEmail.trim() ? { contactEmail: editEmail.trim() } : {}),
+            ...(editPhone.trim() ? { contactPhone: editPhone.trim() } : {}),
+            ...(editSindbad.trim() ? { sindbadNo: editSindbad.trim() } : {}),
+          },
+          lang,
+        );
+        addBooking(res.booking);
+        toast.success(`PNR ${booking.rloc} contact & Sindbad details updated via BFF.`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to update PNR details.");
+      }
+      return;
+    }
+    updateBooking(booking.rloc, (prev) => ({
+      ...prev,
+      ...(editEmail.trim() ? { contactEmail: editEmail.trim() } : {}),
+      ...(editPhone.trim() ? { contactPhone: editPhone.trim() } : {}),
+    }));
+    toast.success("Demo PNR servicing details updated.");
+  };
+
+  const handleInlineRetroClaim = async () => {
+    if (!booking || !bffConnected) return;
+    try {
+      const res = await bffClient.retroClaim(booking.rloc, lang);
+      syncFromBffUser(res.user);
+      trackIbeEvent("mmb_retro_claim", { rloc: booking.rloc, milesCredited: res.milesCredited });
+      toast.success(
+        `Credited +${res.milesCredited.toLocaleString()} Sindbad Miles for ${booking.rloc}!`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Not eligible for retro-claim.");
+    }
+  };
   const holdExpired = booking?.status === "HELD" && isHoldExpired(booking.holdExpiresAt);
-  const refundQuote = booking ? computeRefundQuote({ fareBrand: booking.fareBrand, totalPaidOMR: booking.totalPaidOMR }) : null;
+  const refundQuote = booking
+    ? computeRefundQuote({ fareBrand: booking.fareBrand, totalPaidOMR: booking.totalPaidOMR })
+    : null;
   const milesUpgrade = booking ? getMilesUpgradeOption(booking.fareBrand) : null;
 
   const exchangeQuote = (() => {
     if (!booking) return null;
     const match = findRouteForPair(booking.origin, booking.destination);
-    if (!match) return computeExchangeQuote({ fareBrand: booking.fareBrand, oldFareOMR: 100, newFareOMR: 100 });
+    if (!match)
+      return computeExchangeQuote({
+        fareBrand: booking.fareBrand,
+        oldFareOMR: 100,
+        newFareOMR: 100,
+      });
     const repo = get30DayFareRepository(match.route.id);
     const oldDay = repo.find((d) => d.dateISO === booking.dateISO) ?? repo[0]!;
     const newDay = repo.find((d) => d.dateISO === newDate) ?? repo[0]!;
@@ -113,7 +206,7 @@ function ManageBookingPage() {
     const found = bookings.find(
       (b) =>
         b.rloc.toUpperCase() === rlocClean &&
-        b.passengers.some((p) => p.lastName.toUpperCase() === lastClean)
+        b.passengers.some((p) => p.lastName.toUpperCase() === lastClean),
     );
     if (!found) {
       toast.error("Booking not found for that RLOC + Last Name pair.");
@@ -125,21 +218,31 @@ function ManageBookingPage() {
 
   const handleSettleHold = async () => {
     if (!booking || holdExpired) return;
+    const dueOMR = booking.heldBalanceDueOMR ?? booking.totalPaidOMR;
     if (bffConnected) {
       try {
-        const res = await bffClient.settleHold(booking.rloc, lang);
+        const res = await bffClient.settleHold(
+          booking.rloc,
+          { paymentMethod: "card", paymentDetailLabel: "Settled Held Booking via BFF" },
+          lang,
+        );
         addBooking(res.booking);
-        toast.success(`Held PNR ${booking.rloc} ticketed via BFF!`);
+        syncFromBffUser(res.user);
+        toast.success(
+          `Held PNR ${booking.rloc} ticketed via BFF (${formatMoney(res.collectedOMR, currency)} collected)!`,
+        );
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not settle hold.");
       }
       return;
     }
-    updateBooking(booking.rloc, (prev) => ({
-      ...prev,
+    const { heldBalanceDueOMR: _clr, holdExpiresAt: _clrExp, ...rest } = booking;
+    addBooking({
+      ...rest,
       status: "CONFIRMED",
+      totalPaidOMR: +(booking.totalPaidOMR + dueOMR).toFixed(3),
       paymentMethod: "Settled Held Booking (Demo)",
-    }));
+    });
     toast.success(`Held PNR ${booking.rloc} ticketed and confirmed!`);
   };
 
@@ -147,12 +250,16 @@ function ManageBookingPage() {
     if (!booking) return;
     if (bffConnected) {
       try {
-        const res = await bffClient.applyIrrops(booking.rloc, {
-          action: "rebook",
-          flightNumber: flightNo,
-          departureTime: depTime,
-          arrivalTime: arrTime,
-        }, lang);
+        const res = await bffClient.applyIrrops(
+          booking.rloc,
+          {
+            action: "rebook",
+            flightNumber: flightNo,
+            departureTime: depTime,
+            arrivalTime: arrTime,
+          },
+          lang,
+        );
         addBooking(res.booking);
         syncFromBffUser(res.user);
         toast.success(`Complimentary IRROPS re-accommodation confirmed onto ${flightNo} via BFF!`);
@@ -199,7 +306,7 @@ function ManageBookingPage() {
         const res = await bffClient.exchangeBooking(booking.rloc, newDate, lang);
         addBooking(res.booking);
         toast.success(
-          `Flight exchanged via BFF to ${newDate} (Fee ${formatMoney(res.quote.changeFeeOMR, currency)} + Fare diff ${formatMoney(res.quote.fareDifferenceOMR, currency)}).`
+          `Flight exchanged via BFF to ${newDate} (Fee ${formatMoney(res.quote.changeFeeOMR, currency)} + Fare diff ${formatMoney(res.quote.fareDifferenceOMR, currency)}).`,
         );
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Exchange failed.");
@@ -212,7 +319,7 @@ function ManageBookingPage() {
       totalPaidOMR: prev.totalPaidOMR + exchangeQuote.totalDueOMR,
     }));
     toast.success(
-      `Flight exchanged to ${newDate} (Fee ${formatMoney(exchangeQuote.changeFeeOMR, currency)} + Fare diff ${formatMoney(exchangeQuote.fareDifferenceOMR, currency)}).`
+      `Flight exchanged to ${newDate} (Fee ${formatMoney(exchangeQuote.changeFeeOMR, currency)} + Fare diff ${formatMoney(exchangeQuote.fareDifferenceOMR, currency)}).`,
     );
   };
 
@@ -220,7 +327,13 @@ function ManageBookingPage() {
     if (!booking) return;
     if (bffConnected) {
       try {
-        const res = await bffClient.addBookingAncillary(booking.rloc, label, priceOMR, payAddonsWithMiles, lang);
+        const res = await bffClient.addBookingAncillary(
+          booking.rloc,
+          label,
+          priceOMR,
+          payAddonsWithMiles,
+          lang,
+        );
         addBooking(res.booking);
         syncFromBffUser(res.user);
         toast.success(`Add-on recorded via BFF: ${label}`);
@@ -232,19 +345,25 @@ function ManageBookingPage() {
     const milesCost = priceOMR * 400;
     if (payAddonsWithMiles && priceOMR > 0) {
       if (!sindbadSignedIn || !spendMiles(milesCost)) {
-        toast.error(`Need ${milesCost.toLocaleString()} Sindbad miles (signed in) to redeem this add-on.`);
+        toast.error(
+          `Need ${milesCost.toLocaleString()} Sindbad miles (signed in) to redeem this add-on.`,
+        );
         return;
       }
       updateBooking(booking.rloc, (prev) => ({
         ...prev,
-        ancillaries: prev.ancillaries.includes(label) ? prev.ancillaries : [...prev.ancillaries, `${label} (Miles)`],
+        ancillaries: prev.ancillaries.includes(label)
+          ? prev.ancillaries
+          : [...prev.ancillaries, `${label} (Miles)`],
       }));
       toast.success(`Demo add-on recorded: ${label} for ${milesCost.toLocaleString()} miles.`);
       return;
     }
     updateBooking(booking.rloc, (prev) => ({
       ...prev,
-      ancillaries: prev.ancillaries.includes(label) ? prev.ancillaries : [...prev.ancillaries, label],
+      ancillaries: prev.ancillaries.includes(label)
+        ? prev.ancillaries
+        : [...prev.ancillaries, label],
       totalPaidOMR: prev.totalPaidOMR + priceOMR,
     }));
     toast.success(`Demo add-on recorded for ${label} (${formatMoney(priceOMR, currency)}).`);
@@ -277,7 +396,9 @@ function ManageBookingPage() {
       fareBrand: nextBrand,
       ancillaries: [...prev.ancillaries, `Miles Upgrade → ${FARE_BRANDS[nextBrand].name}`],
     }));
-    toast.success(`Upgraded to ${FARE_BRANDS[nextBrand].name} for ${milesUpgrade.milesRequired.toLocaleString()} Sindbad miles!`);
+    toast.success(
+      `Upgraded to ${FARE_BRANDS[nextBrand].name} for ${milesUpgrade.milesRequired.toLocaleString()} Sindbad miles!`,
+    );
   };
 
   const handleSplitPnr = async () => {
@@ -310,7 +431,9 @@ function ManageBookingPage() {
       passengers: [splitPax],
       totalPaidOMR: splitShare,
     });
-    toast.success(`Split PNR complete! ${splitPax.firstName} moved to ${childRloc} (${formatMoney(splitShare, currency)}).`);
+    toast.success(
+      `Split PNR complete! ${splitPax.firstName} moved to ${childRloc} (${formatMoney(splitShare, currency)}).`,
+    );
   };
 
   const handleRefund = async (toVoucher: boolean) => {
@@ -323,7 +446,7 @@ function ManageBookingPage() {
         toast.success(
           toVoucher
             ? `${formatMoney(res.quote.voucherRefundOMR, currency)} credited to Travel Bank via BFF.`
-            : `Refund of ${formatMoney(res.quote.cashRefundOMR, currency)} processed via BFF.`
+            : `Refund of ${formatMoney(res.quote.cashRefundOMR, currency)} processed via BFF.`,
         );
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Refund failed.");
@@ -333,14 +456,20 @@ function ManageBookingPage() {
     if (toVoucher) {
       addTravelBank(refundQuote.voucherRefundOMR);
       updateBooking(booking.rloc, (prev) => ({ ...prev, status: "VOUCHERED" }));
-      toast.success(`${formatMoney(refundQuote.voucherRefundOMR, currency)} credited to Travel Bank (Demo).`);
+      toast.success(
+        `${formatMoney(refundQuote.voucherRefundOMR, currency)} credited to Travel Bank (Demo).`,
+      );
     } else {
       if (!refundQuote.cashRefundEligible) {
-        toast.error("This non-refundable Saver fare is ineligible for card refund per ATPCO brand rules.");
+        toast.error(
+          "This non-refundable Saver fare is ineligible for card refund per ATPCO brand rules.",
+        );
         return;
       }
       updateBooking(booking.rloc, (prev) => ({ ...prev, status: "REFUNDED" }));
-      toast.success(`Demo refund of ${formatMoney(refundQuote.cashRefundOMR, currency)} recorded (fee: ${formatMoney(refundQuote.cancellationFeeOMR, currency)}).`);
+      toast.success(
+        `Demo refund of ${formatMoney(refundQuote.cashRefundOMR, currency)} recorded (fee: ${formatMoney(refundQuote.cancellationFeeOMR, currency)}).`,
+      );
     }
   };
 
@@ -374,9 +503,17 @@ function ManageBookingPage() {
       <p className="mt-1 text-sm text-muted-foreground">{copy.subtitle}</p>
 
       {/* Retrieval Bar requiring RLOC + Last Name */}
-      <form onSubmit={handleLookup} className="mt-6 grid gap-3 rounded-2xl border border-border bg-card p-5 sm:grid-cols-4">
+      <form
+        onSubmit={handleLookup}
+        className="mt-6 grid gap-3 rounded-2xl border border-border bg-card p-5 sm:grid-cols-4"
+      >
         <div>
-          <label htmlFor="mmb-rloc" className="mb-1 block text-xs font-semibold text-muted-foreground">Booking Reference (RLOC)</label>
+          <label
+            htmlFor="mmb-rloc"
+            className="mb-1 block text-xs font-semibold text-muted-foreground"
+          >
+            Booking Reference (RLOC)
+          </label>
           <input
             id="mmb-rloc"
             value={rlocInput}
@@ -386,7 +523,12 @@ function ManageBookingPage() {
           />
         </div>
         <div>
-          <label htmlFor="mmb-lastname" className="mb-1 block text-xs font-semibold text-muted-foreground">Passenger Last Name</label>
+          <label
+            htmlFor="mmb-lastname"
+            className="mb-1 block text-xs font-semibold text-muted-foreground"
+          >
+            Passenger Last Name
+          </label>
           <input
             id="mmb-lastname"
             value={lastNameInput}
@@ -401,41 +543,68 @@ function ManageBookingPage() {
           </Button>
         </div>
         <div className="flex flex-wrap items-end gap-1.5">
-          {bookings.slice(0, 3).map((b) => (
-            <button
-              key={b.rloc}
-              type="button"
-              onClick={() => {
-                setRlocInput(b.rloc);
-                setLastNameInput(b.passengers[0]?.lastName ?? "");
-                setActiveRloc(b.rloc);
-              }}
-              className={`rounded-lg border px-2.5 py-2 text-xs font-bold ${
-                activeRloc === b.rloc ? "border-primary bg-primary text-primary-foreground" : "border-border bg-muted/50"
-              }`}
-            >
-              {b.rloc} {b.status === "DISRUPTED_CXL" ? "⚠" : ""}
-            </button>
-          ))}
+          {bookings.length > 0
+            ? bookings.slice(0, 3).map((b) => (
+                <button
+                  key={b.rloc}
+                  type="button"
+                  onClick={() => {
+                    setRlocInput(b.rloc);
+                    setLastNameInput(b.passengers[0]?.lastName ?? "");
+                    setActiveRloc(b.rloc);
+                  }}
+                  className={`rounded-lg border px-2.5 py-2 text-xs font-bold ${
+                    activeRloc === b.rloc
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-muted/50"
+                  }`}
+                >
+                  {b.rloc} {b.status === "DISRUPTED_CXL" ? "⚠" : ""}
+                </button>
+              ))
+            : [
+                { rloc: "WY7K9M", lastName: "ALBALUSHI" },
+                { rloc: "WY4D2X", lastName: "ALHARTHI" },
+                { rloc: "WY9U1R", lastName: "ALMAWALI" },
+              ].map((sample) => (
+                <button
+                  key={sample.rloc}
+                  type="button"
+                  onClick={() => {
+                    setRlocInput(sample.rloc);
+                    setLastNameInput(sample.lastName);
+                  }}
+                  className="rounded-lg border border-border bg-muted/50 px-2.5 py-2 text-xs font-bold hover:border-primary"
+                >
+                  Sample {sample.rloc}
+                </button>
+              ))}
         </div>
       </form>
 
       {booking && (
         <div className="mt-6 space-y-6">
           {booking.status === "HELD" && (
-            <div className={`rounded-2xl border-2 p-5 ${holdExpired ? "border-destructive bg-destructive/5" : "border-gold bg-gold/10"}`}>
+            <div
+              className={`rounded-2xl border-2 p-5 ${holdExpired ? "border-destructive bg-destructive/5" : "border-gold bg-gold/10"}`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-display text-lg font-bold">
                     {holdExpired ? "Fare Hold Expired" : "Fare Hold Active"}
                   </h2>
                   <p className="text-xs text-muted-foreground">
-                    {booking.holdExpiresAt ? `Hold expiry: ${new Date(booking.holdExpiresAt).toLocaleString()}` : "Hold window active"}
+                    {booking.holdExpiresAt
+                      ? `Hold expiry: ${new Date(booking.holdExpiresAt).toLocaleString()}`
+                      : "Hold window active"}
                   </p>
                 </div>
                 {!holdExpired && (
                   <Button onClick={handleSettleHold} className="rounded-xl font-display font-bold">
-                    Pay & Issue Ticket Now
+                    Pay Balance &amp; Issue Ticket Now
+                    {booking.heldBalanceDueOMR != null
+                      ? ` (${formatMoney(booking.heldBalanceDueOMR, currency)})`
+                      : ""}
                   </Button>
                 )}
               </div>
@@ -457,8 +626,12 @@ function ManageBookingPage() {
                       onClick={() => handleIrropsRebook("WY 607", "14:15", "15:25")}
                       className="rounded-xl border border-primary bg-card p-3.5 text-start hover:bg-primary/5"
                     >
-                      <p className="text-xs font-bold text-primary">Option 1 · Free Re-protection</p>
-                      <p className="mt-1 font-display text-base font-bold">WY 607 · Today 14:15 → 15:25</p>
+                      <p className="text-xs font-bold text-primary">
+                        Option 1 · Free Re-protection
+                      </p>
+                      <p className="mt-1 font-display text-base font-bold">
+                        WY 607 · Today 14:15 → 15:25
+                      </p>
                       <p className="text-xs text-success font-semibold">OMR 0.000 (Fee Waived)</p>
                     </button>
                     <button
@@ -467,7 +640,9 @@ function ManageBookingPage() {
                       className="rounded-xl border border-primary bg-card p-3.5 text-start hover:bg-primary/5"
                     >
                       <p className="text-xs font-bold text-primary">Option 2 · Evening Departure</p>
-                      <p className="mt-1 font-display text-base font-bold">WY 611 · Today 19:40 → 20:50</p>
+                      <p className="mt-1 font-display text-base font-bold">
+                        WY 611 · Today 19:40 → 20:50
+                      </p>
                       <p className="text-xs text-success font-semibold">OMR 0.000 (Fee Waived)</p>
                     </button>
                     <button
@@ -476,7 +651,9 @@ function ManageBookingPage() {
                       className="rounded-xl border border-gold bg-gold/15 p-3.5 text-start hover:bg-gold/25"
                     >
                       <p className="text-xs font-bold">Option 3 · Care Voucher</p>
-                      <p className="mt-1 font-display text-base font-bold">Hotel + Meal + Travel Bank Credit</p>
+                      <p className="mt-1 font-display text-base font-bold">
+                        Hotel + Meal + Travel Bank Credit
+                      </p>
                       <p className="text-xs text-muted-foreground">Instant voucher</p>
                     </button>
                   </div>
@@ -489,32 +666,62 @@ function ManageBookingPage() {
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
               <div>
                 <div className="flex items-center gap-2.5">
-                  <span className="font-display text-2xl font-extrabold text-primary">{booking.rloc}</span>
-                  <span className={`rounded-full px-3 py-0.5 text-xs font-bold ${
-                    booking.status === "CONFIRMED" ? "bg-success/15 text-success" :
-                    booking.status === "DISRUPTED_CXL" || booking.status === "EXPIRED" ? "bg-destructive/15 text-destructive" :
-                    "bg-warning/20 text-warning-foreground"
-                  }`}>
+                  <span className="font-display text-2xl font-extrabold text-primary">
+                    {booking.rloc}
+                  </span>
+                  <span
+                    className={`rounded-full px-3 py-0.5 text-xs font-bold ${
+                      booking.status === "CONFIRMED"
+                        ? "bg-success/15 text-success"
+                        : booking.status === "DISRUPTED_CXL" || booking.status === "EXPIRED"
+                          ? "bg-destructive/15 text-destructive"
+                          : "bg-warning/20 text-warning-foreground"
+                    }`}
+                  >
                     {holdExpired ? "EXPIRED" : booking.status}
                   </span>
                 </div>
                 <p className="mt-1 text-sm font-semibold">
-                  {booking.flightNumber} · {booking.origin} → {booking.destination} · {booking.dateISO} ({booking.departureTime} – {booking.arrivalTime})
+                  {booking.flightNumber} · {booking.origin} → {booking.destination} ·{" "}
+                  {booking.dateISO} ({booking.departureTime} – {booking.arrivalTime})
                 </p>
                 {booking.returnSegment && (
                   <p className="text-xs font-medium text-primary">
-                    Leg 2 / Return: {booking.returnSegment.flightNumber} · {booking.returnSegment.origin} → {booking.returnSegment.destination} · {booking.returnSegment.dateISO} ({booking.returnSegment.departureTime} – {booking.returnSegment.arrivalTime})
+                    Leg 2 / Return: {booking.returnSegment.flightNumber} ·{" "}
+                    {booking.returnSegment.origin} → {booking.returnSegment.destination} ·{" "}
+                    {booking.returnSegment.dateISO} ({booking.returnSegment.departureTime} –{" "}
+                    {booking.returnSegment.arrivalTime})
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  {booking.aircraft} · {FARE_BRANDS[booking.fareBrand].name} · Paid: {formatMoney(booking.totalPaidOMR, currency)} ({booking.paymentMethod})
+                  {booking.aircraft} · {FARE_BRANDS[booking.fareBrand].name} · Paid:{" "}
+                  {formatMoney(booking.totalPaidOMR, currency)} ({booking.paymentMethod})
+                  {booking.awardMilesUsed
+                    ? ` · Award: ${booking.awardMilesUsed.toLocaleString()} mi`
+                    : ""}
+                  {booking.emdNumbers?.length ? ` · EMD: ${booking.emdNumbers.join(", ")}` : ""}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" className="gap-1.5" onClick={handleGenerateHandoff}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={handleGenerateHandoff}
+                >
                   <QrCode className="h-3.5 w-3.5" /> Mobile Handoff Token
                 </Button>
-                {booking.status === "CONFIRMED" && (
+                {booking.status === "CONFIRMED" && bffConnected && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={handleInlineRetroClaim}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" /> Retro-Claim Miles
+                  </Button>
+                )}
+                {booking.status === "CONFIRMED" && !bffConnected && (
                   <Button asChild variant="secondary" size="sm" className="gap-1.5">
                     <Link to="/sindbad">
                       <Sparkles className="h-3.5 w-3.5" /> Claim Missing Miles
@@ -523,43 +730,114 @@ function ManageBookingPage() {
                 )}
                 {booking.passengers.length > 1 && (
                   <Button variant="outline" size="sm" className="gap-1.5" onClick={handleSplitPnr}>
-                    <Scissors className="h-3.5 w-3.5" /> Split PNR ({booking.passengers.length} Guests)
+                    <Scissors className="h-3.5 w-3.5" /> Split PNR ({booking.passengers.length}{" "}
+                    Guests)
                   </Button>
                 )}
               </div>
             </div>
 
             {handoffToken && (
-              <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
-                Cross-Channel Handoff Token (FR-49): <code className="font-bold">{handoffToken}</code> (valid 15 min)
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-primary/30 bg-primary/5 p-3 text-xs">
+                <div className="space-y-1">
+                  <p className="font-bold text-primary">
+                    Cross-Channel Mobile Handoff Ready (FR-49)
+                  </p>
+                  <p>
+                    Token: <code className="font-bold">{handoffToken}</code> (single-use · valid 15
+                    min)
+                  </p>
+                  <Link
+                    to="/checkin"
+                    search={{ handoff: handoffToken } as Record<string, string>}
+                    className="inline-block font-semibold text-primary underline"
+                  >
+                    Open Check-In on This Device →
+                  </Link>
+                </div>
+                <ScannableQrCode
+                  value={`${typeof window !== "undefined" ? window.location.origin : ""}/checkin?handoff=${handoffToken}`}
+                  label="Mobile check-in handoff QR code"
+                  sizeClass="h-20 w-20"
+                />
               </div>
             )}
 
+            <form
+              onSubmit={handleSaveServicing}
+              className="mt-4 grid gap-2 rounded-xl border border-border bg-muted/30 p-3 sm:grid-cols-4"
+            >
+              <input
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                placeholder="Contact email"
+                aria-label="PNR contact email"
+                className="h-9 rounded-lg border border-input bg-background px-2.5 text-xs"
+              />
+              <input
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                placeholder="Contact phone"
+                aria-label="PNR contact phone"
+                className="h-9 rounded-lg border border-input bg-background px-2.5 text-xs"
+              />
+              <input
+                value={editSindbad}
+                onChange={(e) => setEditSindbad(e.target.value)}
+                placeholder="Sindbad FFP (SB-...)"
+                aria-label="PNR Sindbad FFP number"
+                className="h-9 rounded-lg border border-input bg-background px-2.5 text-xs uppercase"
+              />
+              <Button type="submit" size="sm" variant="secondary" className="h-9 text-xs font-bold">
+                Save PNR Details (FR-126)
+              </Button>
+            </form>
+
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Passengers & Seats</h3>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Passengers & Seats
+                </h3>
                 <div className="mt-2 space-y-2">
                   {booking.passengers.map((p, i) => (
-                    <div key={i} className="flex items-center justify-between rounded-xl border border-border bg-background p-3 text-xs">
+                    <div
+                      key={i}
+                      className="flex items-center justify-between rounded-xl border border-border bg-background p-3 text-xs"
+                    >
                       <div>
-                        <p className="font-bold">{p.firstName} {p.lastName} <span className="text-muted-foreground">({p.type})</span></p>
-                        <p className="text-muted-foreground">Passport: {p.passport} · Seat {p.seat}</p>
+                        <p className="font-bold">
+                          {p.firstName} {p.lastName}{" "}
+                          <span className="text-muted-foreground">({p.type})</span>
+                        </p>
+                        <p className="text-muted-foreground">
+                          Passport: {p.passport} · Seat {p.seat}
+                        </p>
                       </div>
-                      <span className="font-semibold text-primary">{p.checkedIn ? "Checked In" : "Ticketed"}</span>
+                      <span className="font-semibold text-primary">
+                        {p.checkedIn ? "Checked In" : "Ticketed"}
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
               <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Add-ons & SSR Status</h3>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Add-ons & SSR Status
+                </h3>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {booking.ancillaries.map((a) => (
-                    <span key={a} className="inline-flex items-center gap-1 rounded-full bg-secondary px-3 py-1 text-xs font-semibold">
+                    <span
+                      key={a}
+                      className="inline-flex items-center gap-1 rounded-full bg-secondary px-3 py-1 text-xs font-semibold"
+                    >
                       <CheckCircle2 className="h-3 w-3 text-success" /> {a}
                     </span>
                   ))}
                   {booking.ssrs.map((s) => (
-                    <span key={s.code} className="rounded-full border border-border px-3 py-1 text-xs font-semibold">
+                    <span
+                      key={s.code}
+                      className="rounded-full border border-border px-3 py-1 text-xs font-semibold"
+                    >
                       {s.name} ({s.code}: {s.status})
                     </span>
                   ))}
@@ -587,18 +865,24 @@ function ManageBookingPage() {
               />
               {exchangeQuote && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Change fee: <strong>{formatMoney(exchangeQuote.changeFeeOMR, currency)}</strong> · Fare diff:{" "}
+                  Change fee: <strong>{formatMoney(exchangeQuote.changeFeeOMR, currency)}</strong> ·
+                  Fare diff:{" "}
                   <strong>{formatMoney(exchangeQuote.fareDifferenceOMR, currency)}</strong>
                 </p>
               )}
-              <Button className="mt-3 w-full" onClick={handleDateExchange}>{copy.confirmExchange}</Button>
+              <Button className="mt-3 w-full" onClick={handleDateExchange}>
+                {copy.confirmExchange}
+              </Button>
             </div>
 
             <div className="rounded-2xl border border-border bg-card p-5">
               <h3 className="flex items-center gap-2 font-display text-base font-bold">
                 <ShoppingBag className="h-4 w-4 text-primary" /> {copy.shopTitle}
               </h3>
-              <label htmlFor="mmb-pay-miles" className="mt-2 flex items-center gap-2 text-xs font-medium">
+              <label
+                htmlFor="mmb-pay-miles"
+                className="mt-2 flex items-center gap-2 text-xs font-medium"
+              >
                 <input
                   id="mmb-pay-miles"
                   type="checkbox"
@@ -608,11 +892,21 @@ function ManageBookingPage() {
                 Pay add-ons with Sindbad Miles ({sindbadMiles.toLocaleString()} mi)
               </label>
               <div className="mt-3 space-y-2">
-                <Button variant="secondary" size="sm" className="w-full justify-between" onClick={() => handlePostTicketingAdd("+15 kg Post-Ticketing Bag", 20)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-between"
+                  onClick={() => handlePostTicketingAdd("+15 kg Post-Ticketing Bag", 20)}
+                >
                   <span>+15 kg Extra Bag</span>
                   <strong>{payAddonsWithMiles ? "8,000 mi" : formatMoney(20, currency)}</strong>
                 </Button>
-                <Button variant="secondary" size="sm" className="w-full justify-between" onClick={() => handlePostTicketingAdd("Majan Lounge Pass", 24)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-between"
+                  onClick={() => handlePostTicketingAdd("Majan Lounge Pass", 24)}
+                >
                   <span>Majan Lounge Access</span>
                   <strong>{payAddonsWithMiles ? "9,600 mi" : formatMoney(24, currency)}</strong>
                 </Button>
@@ -629,7 +923,9 @@ function ManageBookingPage() {
                         ? `Miles Upgrade → ${FARE_BRANDS[milesUpgrade.targetBrand].name}`
                         : milesUpgrade.reason}
                     </span>
-                    {milesUpgrade.eligible && <strong>{milesUpgrade.milesRequired.toLocaleString()} mi</strong>}
+                    {milesUpgrade.eligible && (
+                      <strong>{milesUpgrade.milesRequired.toLocaleString()} mi</strong>
+                    )}
                   </Button>
                 )}
                 <div className="flex gap-1.5 pt-1">
@@ -641,7 +937,13 @@ function ManageBookingPage() {
                     className="h-9 w-24 rounded-lg border border-input bg-background px-2 text-xs font-bold"
                     aria-label="Upgrade bid amount OMR"
                   />
-                  <Button size="sm" className="flex-1 gap-1 text-xs" onClick={() => handlePostTicketingAdd(`Upgrade Bid Submitted (OMR ${bidAmount} · Demo)`, 0)}>
+                  <Button
+                    size="sm"
+                    className="flex-1 gap-1 text-xs"
+                    onClick={() =>
+                      handlePostTicketingAdd(`Upgrade Bid Submitted (OMR ${bidAmount} · Demo)`, 0)
+                    }
+                  >
                     <ArrowUpCircle className="h-3.5 w-3.5" /> Submit Bid (Demo)
                   </Button>
                 </div>
@@ -660,8 +962,13 @@ function ManageBookingPage() {
                 </p>
               )}
               <div className="mt-4 space-y-2">
-                <Button variant="secondary" className="w-full gap-1.5" onClick={() => handleRefund(true)}>
-                  <Gift className="h-4 w-4 text-primary" /> Credit Travel Bank ({formatMoney(refundQuote?.voucherRefundOMR ?? 0, currency)})
+                <Button
+                  variant="secondary"
+                  className="w-full gap-1.5"
+                  onClick={() => handleRefund(true)}
+                >
+                  <Gift className="h-4 w-4 text-primary" /> Credit Travel Bank (
+                  {formatMoney(refundQuote?.voucherRefundOMR ?? 0, currency)})
                 </Button>
                 <Button
                   variant="outline"

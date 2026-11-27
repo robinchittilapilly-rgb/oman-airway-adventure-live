@@ -54,7 +54,7 @@ export function AncillariesPanel({
   });
 
   const eligibleAncillaries = DIRECT_ANCILLARIES.filter((item) =>
-    isAncillaryEligibleForRoute(item.id, isLongHaul)
+    isAncillaryEligibleForRoute(item.id, isLongHaul),
   );
 
   return (
@@ -94,7 +94,9 @@ export function AncillariesPanel({
               >
                 <div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-display text-sm font-bold">{lang === "ar" ? b.nameAr : b.name}</span>
+                    <span className="font-display text-sm font-bold">
+                      {lang === "ar" ? b.nameAr : b.name}
+                    </span>
                     {b.badge && (
                       <span className="rounded-full bg-gold/25 px-2.5 py-0.5 text-xs font-bold text-foreground">
                         {b.badge}
@@ -108,7 +110,13 @@ export function AncillariesPanel({
                     {formatMoney(b.priceOMR, currency)}
                   </span>
                   <span className="inline-flex items-center gap-1 text-xs font-semibold">
-                    {active ? <><Check className="h-3.5 w-3.5 text-success" /> Added</> : "Add Bundle"}
+                    {active ? (
+                      <>
+                        <Check className="h-3.5 w-3.5 text-success" /> Added
+                      </>
+                    ) : (
+                      "Add Bundle"
+                    )}
                   </span>
                 </div>
               </button>
@@ -124,10 +132,13 @@ export function AncillariesPanel({
             <Briefcase className="h-5 w-5 text-primary" />
             <div>
               <h3 className="font-display text-lg font-bold">
-                {lang === "ar" ? "حاسبة الأمتعة والخدمات الإضافية" : "Total Baggage Allowance & Ancillaries"}
+                {lang === "ar"
+                  ? "حاسبة الأمتعة والخدمات الإضافية"
+                  : "Total Baggage Allowance & Ancillaries"}
               </h3>
               <p className="text-xs text-muted-foreground">
-                Fare: {bagCalc.includedKg} kg · Sindbad {sindbadTier}: +{bagCalc.tierBonusKg} kg · Added: +{bagCalc.purchasedKg} kg
+                Fare: {bagCalc.includedKg} kg · Sindbad {sindbadTier}: +{bagCalc.tierBonusKg} kg ·
+                Added: +{bagCalc.purchasedKg} kg
                 {isLongHaul ? " · Long-haul offers unlocked" : ""}
               </p>
             </div>
@@ -153,7 +164,9 @@ export function AncillariesPanel({
                 aria-pressed={active}
                 onClick={() => onToggleAncillary(item.id)}
                 className={`flex flex-col justify-between rounded-xl border p-3.5 text-start transition-all ${
-                  active ? "border-primary bg-primary/10" : "border-border bg-background hover:border-primary/50"
+                  active
+                    ? "border-primary bg-primary/10"
+                    : "border-border bg-background hover:border-primary/50"
                 }`}
               >
                 <div>
@@ -246,13 +259,17 @@ export function AncillariesPanel({
                         className="mt-0.5"
                       />
                       <div>
-                        <p className="font-semibold">{ssr.name} ({ssr.code})</p>
+                        <p className="font-semibold">
+                          {ssr.name} ({ssr.code})
+                        </p>
                         <p className="text-muted-foreground">{ssr.note}</p>
                       </div>
                     </div>
                     <span
                       className={`shrink-0 rounded px-2 py-0.5 text-xs font-bold ${
-                        ssr.status === "HK" ? "bg-success/15 text-success" : "bg-warning/20 text-warning-foreground"
+                        ssr.status === "HK"
+                          ? "bg-success/15 text-success"
+                          : "bg-warning/20 text-warning-foreground"
                       }`}
                     >
                       {ssr.status === "HK" ? "HK (Demo)" : "PN (Demo)"}
@@ -266,10 +283,13 @@ export function AncillariesPanel({
           <div className="rounded-2xl border-2 border-primary/40 bg-secondary/40 p-5">
             <h3 className="flex items-center gap-2 font-display text-base font-bold">
               <ShieldCheck className="h-4 w-4 text-primary" />
-              {lang === "ar" ? "تأمين السفر (اختيار إلزامي)" : "Oman Air Travel Protection (Required Selection)"}
+              {lang === "ar"
+                ? "تأمين السفر (اختيار إلزامي)"
+                : "Oman Air Travel Protection (Required Selection)"}
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Demo 3rd-party coverage up to $150,000 medical & baggage delay ({formatMoney(12, currency)}).
+              Demo 3rd-party coverage up to $150,000 medical & baggage delay (
+              {formatMoney(12, currency)}).
             </p>
             <div className="mt-3 grid grid-cols-2 gap-2.5">
               <button

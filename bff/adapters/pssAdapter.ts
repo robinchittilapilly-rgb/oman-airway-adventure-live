@@ -19,7 +19,12 @@ import type { BffFlightOffer } from "../types";
 import type { SessionAndCartStore } from "../stores/sessionStore";
 
 export interface PssAdapter {
-  searchFlights(origin: string, destination: string, dateISO: string, pssToken: string): Promise<{
+  searchFlights(
+    origin: string,
+    destination: string,
+    dateISO: string,
+    pssToken: string,
+  ): Promise<{
     routeId: string;
     isLongHaul: boolean;
     baggageGenerousRoute: boolean;
@@ -29,10 +34,20 @@ export interface PssAdapter {
   }>;
   getSeatMap(aircraft: "Boeing 787-9 Dreamliner" | "Boeing 737 MAX 8"): Promise<SeatCell[]>;
   commitBooking(booking: SavedBookingPNR, pssToken: string): Promise<SavedBookingPNR>;
-  retrieveBooking(rloc: string, lastName: string, pssToken: string): Promise<SavedBookingPNR | null>;
+  retrieveBooking(
+    rloc: string,
+    lastName: string,
+    pssToken: string,
+  ): Promise<SavedBookingPNR | null>;
   saveBooking(booking: SavedBookingPNR): Promise<SavedBookingPNR>;
-  splitBooking(booking: SavedBookingPNR): Promise<{ parent: SavedBookingPNR; child: SavedBookingPNR }>;
-  checkIn(booking: SavedBookingPNR, biometricOptIn: boolean, requestBagTags: boolean): Promise<{
+  splitBooking(
+    booking: SavedBookingPNR,
+  ): Promise<{ parent: SavedBookingPNR; child: SavedBookingPNR }>;
+  checkIn(
+    booking: SavedBookingPNR,
+    biometricOptIn: boolean,
+    requestBagTags: boolean,
+  ): Promise<{
     booking: SavedBookingPNR;
     bcbpPayloads: string[];
   }>;
@@ -78,7 +93,7 @@ function encodeOffersAsSimulatedSoapXml(offers: BffFlightOffer[]): string {
   const segs = offers
     .map(
       (o) =>
-        `<FlightSegment Id="${o.id}" FlightNumber="${o.flightNumber}" Origin="${o.origin}" Destination="${o.destination}" DepartureTime="${o.departureTime}" ArrivalTime="${o.arrivalTime}" DurationMinutes="${o.durationMinutes}" Stops="${o.stops}" StopLabel="${o.stopLabel}" Aircraft="${o.aircraft}" HasStudio="${o.hasStudio}" SeatsRemaining="${o.seatsRemaining}" PriceMultiplier="${o.priceMultiplier}" Partner="${o.codesharePartner ?? ""}" />`
+        `<FlightSegment Id="${o.id}" FlightNumber="${o.flightNumber}" Origin="${o.origin}" Destination="${o.destination}" DepartureTime="${o.departureTime}" ArrivalTime="${o.arrivalTime}" DurationMinutes="${o.durationMinutes}" Stops="${o.stops}" StopLabel="${o.stopLabel}" Aircraft="${o.aircraft}" HasStudio="${o.hasStudio}" SeatsRemaining="${o.seatsRemaining}" PriceMultiplier="${o.priceMultiplier}" Partner="${o.codesharePartner ?? ""}" />`,
     )
     .join("");
   return `<soapenv:Envelope><soapenv:Body><OTA_AirAvailRS>${segs}</OTA_AirAvailRS></soapenv:Body></soapenv:Envelope>`;
@@ -117,12 +132,16 @@ export class MockSabrePssAdapter implements PssAdapter {
   }
 
   async commitBooking(booking: SavedBookingPNR, _pssToken: string): Promise<SavedBookingPNR> {
-    this.store.upsertBooking(booking);
+    await this.store.upsertBooking(booking);
     return booking;
   }
 
-  async retrieveBooking(rloc: string, lastName: string, _pssToken: string): Promise<SavedBookingPNR | null> {
-    const found = this.store.getBooking(rloc);
+  async retrieveBooking(
+    rloc: string,
+    lastName: string,
+    _pssToken: string,
+  ): Promise<SavedBookingPNR | null> {
+    const found = await this.store.getBooking(rloc);
     if (!found) return null;
     const cleanLast = lastName.trim().toUpperCase();
     const matchesPax = found.passengers.some((p) => p.lastName.toUpperCase() === cleanLast);
@@ -130,11 +149,13 @@ export class MockSabrePssAdapter implements PssAdapter {
   }
 
   async saveBooking(booking: SavedBookingPNR): Promise<SavedBookingPNR> {
-    this.store.upsertBooking(booking);
+    await this.store.upsertBooking(booking);
     return booking;
   }
 
-  async splitBooking(booking: SavedBookingPNR): Promise<{ parent: SavedBookingPNR; child: SavedBookingPNR }> {
+  async splitBooking(
+    booking: SavedBookingPNR,
+  ): Promise<{ parent: SavedBookingPNR; child: SavedBookingPNR }> {
     const paxCount = booking.passengers.length;
     const splitShare = Math.round(booking.totalPaidOMR / paxCount);
     const remainingShare = Math.max(0, booking.totalPaidOMR - splitShare);
@@ -152,8 +173,8 @@ export class MockSabrePssAdapter implements PssAdapter {
       passengers: [splitPax],
       totalPaidOMR: splitShare,
     };
-    this.store.upsertBooking(parent);
-    this.store.upsertBooking(child);
+    await this.store.upsertBooking(parent);
+    await this.store.upsertBooking(child);
     return { parent, child };
   }
 
@@ -167,7 +188,7 @@ export class MockSabrePssAdapter implements PssAdapter {
         ...(requestBagTags ? { bagTagNumber: generateUniqueBagTagNumber(booking.rloc, idx) } : {}),
       })),
     };
-    this.store.upsertBooking(updated);
+    await this.store.upsertBooking(updated);
     const bcbpPayloads = updated.passengers.map((p, idx) =>
       buildIataBcbpString({
         firstName: p.firstName,
@@ -179,7 +200,7 @@ export class MockSabrePssAdapter implements PssAdapter {
         dateISO: updated.dateISO,
         seat: p.seat,
         seq: idx + 1,
-      })
+      }),
     );
     return { booking: updated, bcbpPayloads };
   }
@@ -189,7 +210,7 @@ export class MockSabrePssAdapter implements PssAdapter {
       ...booking,
       passengers: booking.passengers.map((p) => ({ ...p, checkedIn: false })),
     };
-    this.store.upsertBooking(updated);
+    await this.store.upsertBooking(updated);
     return updated;
   }
 

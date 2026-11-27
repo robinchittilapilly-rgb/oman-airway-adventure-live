@@ -27,6 +27,7 @@ export interface SearchCriteria {
   multiLeg2Destination: string;
   multiLeg2Date: string;
   cabin: CabinClass;
+  awardMode?: boolean | undefined;
   passengers: PassengerCounts;
   promoCode: string;
 }
@@ -47,19 +48,31 @@ const PAX_TYPES: { key: keyof PassengerCounts; label: string; labelAr: string; s
 
 export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProps) {
   const { lang, recentSearches, addRecentSearch } = useIBE();
-  const [tripType, setTripType] = useState<"roundtrip" | "oneway" | "multicity">(initial?.tripType ?? "roundtrip");
+  const [tripType, setTripType] = useState<"roundtrip" | "oneway" | "multicity">(
+    initial?.tripType ?? "roundtrip",
+  );
   const [origin, setOrigin] = useState(initial?.origin ?? "MCT");
   const [destination, setDestination] = useState(initial?.destination ?? "LHR");
   const [destQuery, setDestQuery] = useState("");
   const [departDate, setDepartDate] = useState(initial?.departDate ?? getDateISO(2));
   const [returnDate, setReturnDate] = useState(initial?.returnDate ?? getDateISO(9));
   const [multiLeg2Origin, setMultiLeg2Origin] = useState(initial?.multiLeg2Origin ?? "LHR");
-  const [multiLeg2Destination, setMultiLeg2Destination] = useState(initial?.multiLeg2Destination ?? "DXB");
+  const [multiLeg2Destination, setMultiLeg2Destination] = useState(
+    initial?.multiLeg2Destination ?? "DXB",
+  );
   const [multiLeg2Date, setMultiLeg2Date] = useState(initial?.multiLeg2Date ?? getDateISO(7));
   const [cabin, setCabin] = useState<CabinClass>(initial?.cabin ?? "economy");
+  const [awardMode, setAwardMode] = useState<boolean>(Boolean(initial?.awardMode));
   const [promoCode, setPromoCode] = useState(initial?.promoCode ?? "");
   const [passengers, setPassengers] = useState<PassengerCounts>(
-    initial?.passengers ?? { adults: 1, children: 0, infants: 0, students: 0, seniors: 0, labor: 0 }
+    initial?.passengers ?? {
+      adults: 1,
+      children: 0,
+      infants: 0,
+      students: 0,
+      seniors: 0,
+      labor: 0,
+    },
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -97,7 +110,14 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
     }
     setErrorMsg(null);
     const cleanPromo = promoCode.trim().toUpperCase();
-    addRecentSearch({ origin, destination, departDate, returnDate, tripType, passengers: totalPax });
+    addRecentSearch({
+      origin,
+      destination,
+      departDate,
+      returnDate,
+      tripType,
+      passengers: totalPax,
+    });
     onSearch({
       tripType,
       origin,
@@ -108,6 +128,7 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
       multiLeg2Destination,
       multiLeg2Date,
       cabin,
+      awardMode,
       passengers,
       promoCode: cleanPromo,
     });
@@ -154,9 +175,30 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
             className="h-9 rounded-lg border border-border bg-background px-3 text-xs font-semibold"
           >
             <option value="economy">{lang === "ar" ? "الدرجة السياحية" : "Economy Class"}</option>
-            <option value="business">{lang === "ar" ? "درجة رجال الأعمال" : "Business Class"}</option>
-            <option value="studio">{lang === "ar" ? "أستوديو الأعمال (جناح خاص)" : "Business Studio (Private Suite)"}</option>
+            <option value="business">
+              {lang === "ar" ? "درجة رجال الأعمال" : "Business Class"}
+            </option>
+            <option value="studio">
+              {lang === "ar" ? "أستوديو الأعمال (جناح خاص)" : "Business Studio (Private Suite)"}
+            </option>
           </select>
+
+          <label
+            htmlFor="search-award-mode"
+            className={`inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+              awardMode
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-background text-foreground"
+            }`}
+          >
+            <input
+              id="search-award-mode"
+              type="checkbox"
+              checked={awardMode}
+              onChange={(e) => setAwardMode(e.target.checked)}
+            />
+            {lang === "ar" ? "احجز بالأميال" : "Award (Miles)"}
+          </label>
 
           <div className="relative flex items-center">
             <Tag className="pointer-events-none absolute start-2.5 h-3.5 w-3.5 text-muted-foreground" />
@@ -179,7 +221,10 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-12">
         <div className="lg:col-span-3">
-          <label htmlFor="search-origin" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <label
+            htmlFor="search-origin"
+            className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+          >
             {lang === "ar" ? "من" : "From (City / Code)"}
           </label>
           <select
@@ -213,7 +258,10 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
         </div>
 
         <div className="lg:col-span-3">
-          <label htmlFor="search-dest" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <label
+            htmlFor="search-dest"
+            className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+          >
             {lang === "ar" ? "إلى (أدخل LON أو رمز المدينة)" : "To (Supports LON, PAR, Nearby)"}
           </label>
           <div className="flex gap-1.5">
@@ -252,7 +300,10 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
         </div>
 
         <div className={tripType === "roundtrip" ? "lg:col-span-2" : "lg:col-span-3"}>
-          <label htmlFor="search-depart" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <label
+            htmlFor="search-depart"
+            className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+          >
             {lang === "ar" ? "تاريخ المغادرة" : "Depart"}
           </label>
           <div className="relative">
@@ -271,7 +322,10 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
 
         {tripType === "roundtrip" && (
           <div className="lg:col-span-2">
-            <label htmlFor="search-return" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <label
+              htmlFor="search-return"
+              className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+            >
               {lang === "ar" ? "تاريخ العودة" : "Return"}
             </label>
             <input
@@ -287,7 +341,10 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
         )}
 
         <div className={tripType === "roundtrip" ? "lg:col-span-1" : "lg:col-span-2"}>
-          <label htmlFor="search-guests-btn" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <label
+            htmlFor="search-guests-btn"
+            className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+          >
             {lang === "ar" ? "المسافرون" : "Guests"}
           </label>
           <Popover>
@@ -312,7 +369,9 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
                 {PAX_TYPES.map((pt) => (
                   <div key={pt.key} className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold">{lang === "ar" ? pt.labelAr : pt.label}</p>
+                      <p className="text-xs font-semibold">
+                        {lang === "ar" ? pt.labelAr : pt.label}
+                      </p>
                       <p className="text-xs text-muted-foreground">{pt.sub}</p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -324,7 +383,9 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
                       >
                         -
                       </button>
-                      <span className="w-5 text-center text-xs font-bold">{passengers[pt.key]}</span>
+                      <span className="w-5 text-center text-xs font-bold">
+                        {passengers[pt.key]}
+                      </span>
                       <button
                         type="button"
                         onClick={() => adjustPax(pt.key, 1)}
@@ -350,26 +411,70 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
       {tripType === "multicity" && (
         <div className="mt-3 grid gap-3 rounded-xl border border-dashed border-border bg-muted/35 p-3 sm:grid-cols-3">
           <div>
-            <label htmlFor="leg2-origin" className="mb-1 block text-xs font-semibold text-muted-foreground">Leg 2 From</label>
-            <select id="leg2-origin" value={multiLeg2Origin} onChange={(e) => setMultiLeg2Origin(e.target.value)} className="h-10 w-full rounded-lg border border-input bg-background px-2.5 text-xs font-semibold">
-              {AIRPORTS.map((a) => <option key={a.code} value={a.code}>{a.code} — {lang === "ar" ? a.cityAr : a.city}</option>)}
+            <label
+              htmlFor="leg2-origin"
+              className="mb-1 block text-xs font-semibold text-muted-foreground"
+            >
+              Leg 2 From
+            </label>
+            <select
+              id="leg2-origin"
+              value={multiLeg2Origin}
+              onChange={(e) => setMultiLeg2Origin(e.target.value)}
+              className="h-10 w-full rounded-lg border border-input bg-background px-2.5 text-xs font-semibold"
+            >
+              {AIRPORTS.map((a) => (
+                <option key={a.code} value={a.code}>
+                  {a.code} — {lang === "ar" ? a.cityAr : a.city}
+                </option>
+              ))}
             </select>
           </div>
           <div>
-            <label htmlFor="leg2-dest" className="mb-1 block text-xs font-semibold text-muted-foreground">Leg 2 To</label>
-            <select id="leg2-dest" value={multiLeg2Destination} onChange={(e) => setMultiLeg2Destination(e.target.value)} className="h-10 w-full rounded-lg border border-input bg-background px-2.5 text-xs font-semibold">
-              {AIRPORTS.map((a) => <option key={a.code} value={a.code}>{a.code} — {lang === "ar" ? a.cityAr : a.city}</option>)}
+            <label
+              htmlFor="leg2-dest"
+              className="mb-1 block text-xs font-semibold text-muted-foreground"
+            >
+              Leg 2 To
+            </label>
+            <select
+              id="leg2-dest"
+              value={multiLeg2Destination}
+              onChange={(e) => setMultiLeg2Destination(e.target.value)}
+              className="h-10 w-full rounded-lg border border-input bg-background px-2.5 text-xs font-semibold"
+            >
+              {AIRPORTS.map((a) => (
+                <option key={a.code} value={a.code}>
+                  {a.code} — {lang === "ar" ? a.cityAr : a.city}
+                </option>
+              ))}
             </select>
           </div>
           <div>
-            <label htmlFor="leg2-date" className="mb-1 block text-xs font-semibold text-muted-foreground">Leg 2 Date</label>
-            <input id="leg2-date" type="date" value={multiLeg2Date} min={departDate} max={maxDate} onChange={(e) => setMultiLeg2Date(e.target.value)} className="h-10 w-full rounded-lg border border-input bg-background px-2.5 text-xs font-medium" />
+            <label
+              htmlFor="leg2-date"
+              className="mb-1 block text-xs font-semibold text-muted-foreground"
+            >
+              Leg 2 Date
+            </label>
+            <input
+              id="leg2-date"
+              type="date"
+              value={multiLeg2Date}
+              min={departDate}
+              max={maxDate}
+              onChange={(e) => setMultiLeg2Date(e.target.value)}
+              className="h-10 w-full rounded-lg border border-input bg-background px-2.5 text-xs font-medium"
+            />
           </div>
         </div>
       )}
 
       {errorMsg && (
-        <p role="alert" className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive">
+        <p
+          role="alert"
+          className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive"
+        >
           {errorMsg}
         </p>
       )}
@@ -398,7 +503,11 @@ export function FlightSearchWidget({ initial, onSearch }: FlightSearchWidgetProp
           )}
         </div>
 
-        <Button type="submit" size="lg" className="h-12 gap-2 rounded-xl px-7 font-display text-sm font-bold">
+        <Button
+          type="submit"
+          size="lg"
+          className="h-12 gap-2 rounded-xl px-7 font-display text-sm font-bold"
+        >
           <Search className="h-4 w-4" />
           {lang === "ar" ? "ابحث عن الرحلات" : "Search Flights"}
         </Button>

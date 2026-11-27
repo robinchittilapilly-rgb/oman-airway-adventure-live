@@ -1,48 +1,82 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { BffCartState, BffHandoffPayload, BffSessionUser } from "../types";
+import type {
+  BffAuditEntry,
+  BffCartState,
+  BffCmsState,
+  BffHandoffPayload,
+  BffSessionUser,
+} from "../types";
 import type { HouseholdMember, SavedBookingPNR } from "../../src/data/ancillariesAndSeats";
 import { INITIAL_SAMPLE_PNRS } from "../../src/data/ancillariesAndSeats";
+
+export type MaybePromise<T> = T | Promise<T>;
 
 export interface BffSessionRecord {
   sessionId: string;
   /** Internal PSS session identifier kept strictly on the server (FR-45). */
   internalPssToken: string;
+  authorizedRlocs: string[];
   user: BffSessionUser;
   createdAt: string;
 }
 
 export interface SessionAndCartStore {
-  getSession(sessionId: string): BffSessionRecord | null;
-  saveSession(record: BffSessionRecord): void;
-  getCart(cartId: string): BffCartState | null;
-  saveCart(cart: BffCartState): void;
-  deleteCart(cartId: string): void;
-  getBookings(): SavedBookingPNR[];
-  getBooking(rloc: string): SavedBookingPNR | null;
-  upsertBooking(booking: SavedBookingPNR): void;
-  getHousehold(): HouseholdMember[];
-  setHousehold(members: HouseholdMember[]): void;
-  getClaimedPnrs(): string[];
-  addClaimedPnr(pnr: string): void;
-  saveHandoff(payload: BffHandoffPayload): void;
-  consumeHandoff(token: string): BffHandoffPayload | null;
+  readonly backendName: "memory-file" | "postgres";
+  getSession(sessionId: string): MaybePromise<BffSessionRecord | null>;
+  saveSession(record: BffSessionRecord): MaybePromise<void>;
+  getCart(cartId: string): MaybePromise<BffCartState | null>;
+  saveCart(cart: BffCartState): MaybePromise<void>;
+  deleteCart(cartId: string): MaybePromise<void>;
+  getBookings(): MaybePromise<SavedBookingPNR[]>;
+  getBooking(rloc: string): MaybePromise<SavedBookingPNR | null>;
+  upsertBooking(booking: SavedBookingPNR): MaybePromise<void>;
+  getHousehold(memberId?: string): MaybePromise<HouseholdMember[]>;
+  setHousehold(members: HouseholdMember[], memberId?: string): MaybePromise<void>;
+  getClaimedPnrs(memberId?: string): MaybePromise<string[]>;
+  addClaimedPnr(pnr: string, memberId?: string): MaybePromise<void>;
+  saveHandoff(payload: BffHandoffPayload): MaybePromise<void>;
+  consumeHandoff(token: string): MaybePromise<BffHandoffPayload | null>;
+  appendAuditLog(entry: BffAuditEntry): MaybePromise<void>;
+  getAuditLogs(limit?: number): MaybePromise<BffAuditEntry[]>;
+  getCmsState(): MaybePromise<BffCmsState | null>;
+  saveCmsState(state: BffCmsState): MaybePromise<void>;
 }
 
 interface PersistedSnapshot {
   sessions: Record<string, BffSessionRecord>;
   carts: Record<string, BffCartState>;
   bookings: SavedBookingPNR[];
-  household: HouseholdMember[];
-  claimedPnrs: string[];
+  householdByMember: Record<string, HouseholdMember[]>;
+  claimedPnrsByMember: Record<string, string[]>;
   handoffs: Record<string, BffHandoffPayload>;
+  auditLogs: BffAuditEntry[];
+  cmsState: BffCmsState | null;
 }
 
+const DEFAULT_DEMO_HOUSEHOLD: HouseholdMember[] = [
+  {
+    id: "hh-1",
+    name: "Reem Al-Balushi",
+    relation: "Spouse",
+    sindbadNo: "SB-8841210",
+    contributedMiles: 14200,
+  },
+  {
+    id: "hh-2",
+    name: "Yusuf Al-Balushi",
+    relation: "Child",
+    sindbadNo: "SB-9100342",
+    contributedMiles: 4850,
+  },
+];
+
 /**
- * Server-side store for sessions, omnichannel carts, PNRs, and handoff tokens
- * (FR-2, FR-40, FR-49, FR-79, FR-88, FR-109).
+ * Local JSON-file / in-memory store for dev, unit tests, and non-DB previews.
+ * Production deployments configure DATABASE_URL to use PostgresSessionStore.
  */
 export class FileBackedSessionStore implements SessionAndCartStore {
+  readonly backendName = "memory-file" as const;
   private state: PersistedSnapshot;
 
   constructor(private readonly filePath?: string) {
@@ -52,17 +86,20 @@ export class FileBackedSessionStore implements SessionAndCartStore {
   private loadInitial(): PersistedSnapshot {
     if (this.filePath && existsSync(this.filePath)) {
       try {
-        const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<PersistedSnapshot>;
+        const parsed = JSON.parse(
+          readFileSync(this.filePath, "utf8"),
+        ) as Partial<PersistedSnapshot>;
         return {
           sessions: parsed.sessions ?? {},
           carts: parsed.carts ?? {},
           bookings: parsed.bookings ?? [...INITIAL_SAMPLE_PNRS],
-          household: parsed.household ?? [
-            { id: "hh-1", name: "Reem Al-Balushi", relation: "Spouse", sindbadNo: "SB-8841210", contributedMiles: 14200 },
-            { id: "hh-2", name: "Yusuf Al-Balushi", relation: "Child", sindbadNo: "SB-9100342", contributedMiles: 4850 },
-          ],
-          claimedPnrs: parsed.claimedPnrs ?? [],
+          householdByMember: parsed.householdByMember ?? {
+            "mem-tariq-01": [...DEFAULT_DEMO_HOUSEHOLD],
+          },
+          claimedPnrsByMember: parsed.claimedPnrsByMember ?? {},
           handoffs: parsed.handoffs ?? {},
+          auditLogs: parsed.auditLogs ?? [],
+          cmsState: parsed.cmsState ?? null,
         };
       } catch {
         // Fall through to clean seed state
@@ -72,12 +109,11 @@ export class FileBackedSessionStore implements SessionAndCartStore {
       sessions: {},
       carts: {},
       bookings: [...INITIAL_SAMPLE_PNRS],
-      household: [
-        { id: "hh-1", name: "Reem Al-Balushi", relation: "Spouse", sindbadNo: "SB-8841210", contributedMiles: 14200 },
-        { id: "hh-2", name: "Yusuf Al-Balushi", relation: "Child", sindbadNo: "SB-9100342", contributedMiles: 4850 },
-      ],
-      claimedPnrs: [],
+      householdByMember: { "mem-tariq-01": [...DEFAULT_DEMO_HOUSEHOLD] },
+      claimedPnrsByMember: {},
       handoffs: {},
+      auditLogs: [],
+      cmsState: null,
     };
   }
 
@@ -131,22 +167,23 @@ export class FileBackedSessionStore implements SessionAndCartStore {
     this.flush();
   }
 
-  getHousehold(): HouseholdMember[] {
-    return this.state.household;
+  getHousehold(memberId = "anonymous"): HouseholdMember[] {
+    return this.state.householdByMember[memberId] ?? [];
   }
 
-  setHousehold(members: HouseholdMember[]): void {
-    this.state.household = members;
+  setHousehold(members: HouseholdMember[], memberId = "anonymous"): void {
+    this.state.householdByMember[memberId] = members;
     this.flush();
   }
 
-  getClaimedPnrs(): string[] {
-    return this.state.claimedPnrs;
+  getClaimedPnrs(memberId = "anonymous"): string[] {
+    return this.state.claimedPnrsByMember[memberId] ?? [];
   }
 
-  addClaimedPnr(pnr: string): void {
-    if (!this.state.claimedPnrs.includes(pnr)) {
-      this.state.claimedPnrs.push(pnr);
+  addClaimedPnr(pnr: string, memberId = "anonymous"): void {
+    const current = this.state.claimedPnrsByMember[memberId] ?? [];
+    if (!current.includes(pnr)) {
+      this.state.claimedPnrsByMember[memberId] = [...current, pnr];
       this.flush();
     }
   }
@@ -159,11 +196,29 @@ export class FileBackedSessionStore implements SessionAndCartStore {
   consumeHandoff(token: string): BffHandoffPayload | null {
     const found = this.state.handoffs[token];
     if (!found) return null;
+    delete this.state.handoffs[token];
+    this.flush();
     if (Date.now() > Date.parse(found.expiresAt)) {
-      delete this.state.handoffs[token];
-      this.flush();
       return null;
     }
     return found;
+  }
+
+  appendAuditLog(entry: BffAuditEntry): void {
+    this.state.auditLogs = [entry, ...this.state.auditLogs].slice(0, 500);
+    this.flush();
+  }
+
+  getAuditLogs(limit = 50): BffAuditEntry[] {
+    return this.state.auditLogs.slice(0, limit);
+  }
+
+  getCmsState(): BffCmsState | null {
+    return this.state.cmsState;
+  }
+
+  saveCmsState(state: BffCmsState): void {
+    this.state.cmsState = state;
+    this.flush();
   }
 }

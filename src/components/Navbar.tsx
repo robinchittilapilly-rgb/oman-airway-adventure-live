@@ -14,6 +14,7 @@ export function Navbar() {
     setLang,
     currency,
     setCurrency,
+    demoModeEnabled,
     sindbadSignedIn,
     sindbadTier,
     setSindbadTier,
@@ -31,6 +32,7 @@ export function Navbar() {
     { to: "/checkin" as const, label: copy.nav.checkin },
     { to: "/status" as const, label: copy.nav.status },
     { to: "/sindbad" as const, label: copy.nav.sindbad },
+    { to: "/admin" as const, label: lang === "ar" ? "الإدارة" : "CMS/Admin" },
   ];
 
   const cycleTier = () => {
@@ -42,7 +44,10 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-40 border-b border-border/80 bg-background/95 backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-        <Link to="/" className="focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg">
+        <Link
+          to="/"
+          className="focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg"
+        >
           <OmanAirLogo />
         </Link>
 
@@ -92,16 +97,28 @@ export function Navbar() {
 
           {sindbadSignedIn ? (
             <div className="inline-flex items-center gap-1">
-              <button
-                type="button"
-                onClick={cycleTier}
-                title="Demo control: click to switch Sindbad tier"
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gold/50 bg-gold/15 px-3 text-xs font-semibold text-foreground transition-colors hover:bg-gold/25"
-              >
-                <Sparkles className="h-3.5 w-3.5 text-primary" />
-                <span>Sindbad {sindbadTier}</span>
-                <span className="text-muted-foreground">· {sindbadMiles.toLocaleString()} mi</span>
-              </button>
+              {demoModeEnabled ? (
+                <button
+                  type="button"
+                  onClick={cycleTier}
+                  title="Demo control: click to switch Sindbad tier"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gold/50 bg-gold/15 px-3 text-xs font-semibold text-foreground transition-colors hover:bg-gold/25"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  <span>Sindbad {sindbadTier}</span>
+                  <span className="text-muted-foreground">
+                    · {sindbadMiles.toLocaleString()} mi
+                  </span>
+                </button>
+              ) : (
+                <div className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-gold/50 bg-gold/15 px-3 text-xs font-semibold text-foreground">
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  <span>Sindbad {sindbadTier}</span>
+                  <span className="text-muted-foreground">
+                    · {sindbadMiles.toLocaleString()} mi
+                  </span>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={toggleSindbadSignIn}
@@ -113,9 +130,14 @@ export function Navbar() {
               </button>
             </div>
           ) : (
-            <Button variant="secondary" size="sm" onClick={toggleSindbadSignIn} className="h-9 gap-1.5 text-xs font-semibold">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={toggleSindbadSignIn}
+              className="h-9 gap-1.5 text-xs font-semibold"
+            >
               <LogIn className="h-3.5 w-3.5" />
-              {copy.nav.guest} · {copy.nav.signIn}
+              {copy.nav.guest} · {demoModeEnabled ? `${copy.nav.signIn} (Demo)` : copy.nav.signIn}
             </Button>
           )}
 
@@ -150,7 +172,9 @@ export function Navbar() {
                 to={item.to}
                 onClick={() => setMobileOpen(false)}
                 className={`rounded-lg px-3 py-2.5 text-sm font-medium ${
-                  pathname === item.to ? "bg-primary/10 text-primary font-semibold" : "text-foreground"
+                  pathname === item.to
+                    ? "bg-primary/10 text-primary font-semibold"
+                    : "text-foreground"
                 }`}
               >
                 {item.label}
@@ -165,10 +189,16 @@ export function Navbar() {
               className="h-9 rounded-lg border border-border bg-background px-2.5 text-xs font-semibold"
             >
               {(Object.keys(CURRENCIES) as CurrencyCode[]).map((c) => (
-                <option key={c} value={c}>{c}</option>
+                <option key={c} value={c}>
+                  {c}
+                </option>
               ))}
             </select>
-            <Button variant="outline" size="sm" onClick={() => setLang(lang === "en" ? "ar" : "en")}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLang(lang === "en" ? "ar" : "en")}
+            >
               {lang === "en" ? "العربية (RTL)" : "English (LTR)"}
             </Button>
             <Button variant="secondary" size="sm" onClick={toggleSindbadSignIn}>

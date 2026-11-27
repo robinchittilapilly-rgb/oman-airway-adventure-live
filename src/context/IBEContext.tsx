@@ -1,10 +1,15 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { CurrencyCode } from "../data/omanAirRoutes";
-import { INITIAL_SAMPLE_PNRS, type HouseholdMember, type SavedBookingPNR, type SindbadTier } from "../data/ancillariesAndSeats";
+import {
+  INITIAL_SAMPLE_PNRS,
+  type HouseholdMember,
+  type SavedBookingPNR,
+  type SindbadTier,
+} from "../data/ancillariesAndSeats";
 export type { HouseholdMember };
 import { bffClient, getConfiguredBffUrl } from "../lib/bff-client";
 import { isHoldExpired } from "../lib/ibe-rules";
-import type { BffSessionUser } from "../../bff/types";
+import type { BffCmsState, BffSessionUser } from "../../bff/types";
 
 export type AppLang = "en" | "ar";
 
@@ -32,14 +37,31 @@ const DEFAULT_PREFS: IBEPersistedPrefs = {
   currency: "OMR",
   darkSiteMode: false,
   recentSearches: [
-    { id: "rs-1", origin: "MCT", destination: "LHR", departDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10), tripType: "roundtrip", passengers: 2 },
-    { id: "rs-2", origin: "MCT", destination: "DXB", departDate: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10), tripType: "oneway", passengers: 1 },
+    {
+      id: "rs-1",
+      origin: "MCT",
+      destination: "LHR",
+      departDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+      tripType: "roundtrip",
+      passengers: 2,
+    },
+    {
+      id: "rs-2",
+      origin: "MCT",
+      destination: "DXB",
+      departDate: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10),
+      tripType: "oneway",
+      passengers: 1,
+    },
   ],
 };
 
 interface IBEContextValue extends IBEPersistedPrefs {
   bffUrl: string | null;
   bffConnected: boolean;
+  demoModeEnabled: boolean;
+  role: "guest" | "member" | "admin";
+  cmsState: BffCmsState | null;
   sindbadSignedIn: boolean;
   sindbadMemberName: string;
   sindbadTier: SindbadTier;
@@ -53,6 +75,11 @@ interface IBEContextValue extends IBEPersistedPrefs {
   setCurrency: (currency: CurrencyCode) => void;
   setSindbadTier: (tier: SindbadTier) => void;
   signInSindbad: (name?: string) => void;
+  signInOidcPkce: (
+    name?: string,
+    tier?: SindbadTier,
+    requestedRole?: "member" | "admin",
+  ) => Promise<void>;
   signOutSindbad: () => void;
   toggleSindbadSignIn: () => void;
   setDarkSiteMode: (enabled: boolean) => void;
@@ -74,9 +101,7 @@ const IBEContext = createContext<IBEContextValue | null>(null);
 
 function enforceHoldExpiries(bookings: SavedBookingPNR[]): SavedBookingPNR[] {
   return bookings.map((b) =>
-    b.status === "HELD" && isHoldExpired(b.holdExpiresAt)
-      ? { ...b, status: "EXPIRED" }
-      : b
+    b.status === "HELD" && isHoldExpired(b.holdExpiresAt) ? { ...b, status: "EXPIRED" } : b,
   );
 }
 
@@ -86,20 +111,41 @@ export function IBEProvider({ children }: { children: ReactNode }) {
 
   const bffUrl = getConfiguredBffUrl();
   const [bffConnected, setBffConnected] = useState(false);
-  const [sindbadSignedIn, setSindbadSignedIn] = useState(true);
+  const [demoModeEnabled, setDemoModeEnabled] = useState(true);
+  const [role, setRole] = useState<"guest" | "member" | "admin">(bffUrl ? "guest" : "member");
+  const [cmsState, setCmsState] = useState<BffCmsState | null>(null);
+  const [sindbadSignedIn, setSindbadSignedIn] = useState(!bffUrl);
   const [sindbadMemberName, setSindbadMemberName] = useState("Tariq Al-Balushi");
-  const [sindbadTier, setSindbadTierState] = useState<SindbadTier>("Gold");
-  const [sindbadMiles, setSindbadMiles] = useState(68450);
-  const [tierPoints, setTierPoints] = useState(420);
-  const [travelBankOMR, setTravelBankOMR] = useState(65);
-  const [bookings, setBookings] = useState<SavedBookingPNR[]>(INITIAL_SAMPLE_PNRS);
-  const [household, setHousehold] = useState<HouseholdMember[]>([
-    { id: "hh-1", name: "Reem Al-Balushi", relation: "Spouse", sindbadNo: "SB-8841210", contributedMiles: 14200 },
-    { id: "hh-2", name: "Yusuf Al-Balushi", relation: "Child", sindbadNo: "SB-9100342", contributedMiles: 4850 },
-  ]);
+  const [sindbadTier, setSindbadTierState] = useState<SindbadTier>(bffUrl ? "Blue" : "Gold");
+  const [sindbadMiles, setSindbadMiles] = useState(bffUrl ? 0 : 68450);
+  const [tierPoints, setTierPoints] = useState(bffUrl ? 0 : 420);
+  const [travelBankOMR, setTravelBankOMR] = useState(bffUrl ? 0 : 65);
+  const [bookings, setBookings] = useState<SavedBookingPNR[]>(bffUrl ? [] : INITIAL_SAMPLE_PNRS);
+  const [household, setHousehold] = useState<HouseholdMember[]>(
+    bffUrl
+      ? []
+      : [
+          {
+            id: "hh-1",
+            name: "Reem Al-Balushi",
+            relation: "Spouse",
+            sindbadNo: "SB-8841210",
+            contributedMiles: 14200,
+          },
+          {
+            id: "hh-2",
+            name: "Yusuf Al-Balushi",
+            relation: "Child",
+            sindbadNo: "SB-9100342",
+            contributedMiles: 4850,
+          },
+        ],
+  );
   const [claimedPnrs, setClaimedPnrs] = useState<string[]>([]);
 
   const syncFromBffUser = (user: BffSessionUser) => {
+    setDemoModeEnabled(user.demoModeEnabled !== false);
+    setRole(user.role);
     setSindbadSignedIn(user.signedIn);
     if (user.memberName) setSindbadMemberName(user.memberName);
     setSindbadTierState(user.tier);
@@ -111,15 +157,22 @@ export function IBEProvider({ children }: { children: ReactNode }) {
   const refreshFromBff = async () => {
     if (!bffUrl) return;
     try {
-      const [sessRes, bookRes, loyRes] = await Promise.all([
+      const [sessRes, bookRes, loyRes, cmsRes] = await Promise.all([
         bffClient.getSession(prefs.lang),
         bffClient.listBookings(prefs.lang),
         bffClient.getLoyaltyProfile(prefs.lang),
+        bffClient.getCmsContent(prefs.lang).catch(() => null),
       ]);
       syncFromBffUser(sessRes.user);
       setBookings(enforceHoldExpiries(bookRes.bookings));
       setHousehold(loyRes.household);
       setClaimedPnrs(loyRes.claimedPnrs);
+      if (cmsRes) {
+        setCmsState(cmsRes.cms);
+        if (cmsRes.cms.darkSiteActive) {
+          setPrefs((s) => ({ ...s, darkSiteMode: true }));
+        }
+      }
       setBffConnected(true);
     } catch {
       setBffConnected(false);
@@ -132,6 +185,12 @@ export function IBEProvider({ children }: { children: ReactNode }) {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<IBEPersistedPrefs>;
         setPrefs((prev) => ({ ...prev, ...parsed }));
+      } else if (
+        typeof navigator !== "undefined" &&
+        navigator.language.toLowerCase().startsWith("ar")
+      ) {
+        // FR-30: browser-language detection on first visit
+        setPrefs((prev) => ({ ...prev, lang: "ar" }));
       }
     } catch {
       // ignore storage errors
@@ -159,10 +218,53 @@ export function IBEProvider({ children }: { children: ReactNode }) {
     document.documentElement.lang = prefs.lang;
   }, [prefs.lang]);
 
+  const signInOidcPkce = async (
+    name = "Tariq Al-Balushi",
+    tier: SindbadTier = "Gold",
+    requestedRole: "member" | "admin" = "member",
+  ) => {
+    if (!bffConnected) {
+      setSindbadSignedIn(true);
+      setRole(requestedRole);
+      setSindbadMemberName(name);
+      setSindbadTierState(tier);
+      return;
+    }
+    const authInit = await bffClient.startOidcPkce(window.location.href, requestedRole, prefs.lang);
+    if (authInit.mode === "external-oidc") {
+      window.location.assign(authInit.authorizationUrl);
+      return;
+    }
+    if (authInit.sandboxAuthCode && authInit.sandboxCodeVerifier) {
+      const cb = await bffClient.completeOidcCallback(
+        {
+          state: authInit.state,
+          code: authInit.sandboxAuthCode,
+          codeVerifier: authInit.sandboxCodeVerifier,
+          memberName: name,
+          tier,
+          role: requestedRole,
+        },
+        prefs.lang,
+      );
+      syncFromBffUser(cb.user);
+      const [bookRes, loyRes] = await Promise.all([
+        bffClient.listBookings(prefs.lang),
+        bffClient.getLoyaltyProfile(prefs.lang),
+      ]);
+      setBookings(enforceHoldExpiries(bookRes.bookings));
+      setHousehold(loyRes.household);
+      setClaimedPnrs(loyRes.claimedPnrs);
+    }
+  };
+
   const value: IBEContextValue = {
     ...prefs,
     bffUrl,
     bffConnected,
+    demoModeEnabled,
+    role,
+    cmsState,
     sindbadSignedIn,
     sindbadMemberName,
     sindbadTier,
@@ -178,28 +280,47 @@ export function IBEProvider({ children }: { children: ReactNode }) {
       setSindbadTierState(tier);
       setSindbadSignedIn(true);
       if (bffConnected) {
-        void bffClient.switchTier(tier, prefs.lang).then((r) => syncFromBffUser(r.user)).catch(() => {});
+        void bffClient
+          .switchTier(tier, prefs.lang)
+          .then((r) => syncFromBffUser(r.user))
+          .catch(() => {});
       }
     },
     signInSindbad: (name) => {
-      setSindbadSignedIn(true);
-      if (name?.trim()) setSindbadMemberName(name.trim());
-      if (bffConnected) {
-        void bffClient.login(name, undefined, prefs.lang).then((r) => syncFromBffUser(r.user)).catch(() => {});
-      }
+      void signInOidcPkce(name || "Tariq Al-Balushi", "Gold", "member");
     },
+    signInOidcPkce,
     signOutSindbad: () => {
       setSindbadSignedIn(false);
+      setRole("guest");
       if (bffConnected) {
-        void bffClient.logout(prefs.lang).then((r) => syncFromBffUser(r.user)).catch(() => {});
+        void bffClient
+          .logout(prefs.lang)
+          .then(async (r) => {
+            syncFromBffUser(r.user);
+            const [bookRes, loyRes] = await Promise.all([
+              bffClient.listBookings(prefs.lang),
+              bffClient.getLoyaltyProfile(prefs.lang),
+            ]);
+            setBookings(enforceHoldExpiries(bookRes.bookings));
+            setHousehold(loyRes.household);
+            setClaimedPnrs(loyRes.claimedPnrs);
+          })
+          .catch(() => {});
       }
     },
     toggleSindbadSignIn: () => {
-      const next = !sindbadSignedIn;
-      setSindbadSignedIn(next);
-      if (bffConnected) {
-        const req = next ? bffClient.login(undefined, undefined, prefs.lang) : bffClient.logout(prefs.lang);
-        void req.then((r) => syncFromBffUser(r.user)).catch(() => {});
+      if (sindbadSignedIn) {
+        setSindbadSignedIn(false);
+        setRole("guest");
+        if (bffConnected) {
+          void bffClient
+            .logout(prefs.lang)
+            .then((r) => syncFromBffUser(r.user))
+            .catch(() => {});
+        }
+      } else {
+        void signInOidcPkce("Tariq Al-Balushi", "Gold", "member");
       }
     },
     setDarkSiteMode: (darkSiteMode) => setPrefs((s) => ({ ...s, darkSiteMode })),
@@ -209,7 +330,12 @@ export function IBEProvider({ children }: { children: ReactNode }) {
         recentSearches: [
           { ...search, id: `rs-${Date.now()}` },
           ...s.recentSearches.filter(
-            (r) => !(r.origin === search.origin && r.destination === search.destination && r.departDate === search.departDate)
+            (r) =>
+              !(
+                r.origin === search.origin &&
+                r.destination === search.destination &&
+                r.departDate === search.departDate
+              ),
           ),
         ].slice(0, 5),
       })),

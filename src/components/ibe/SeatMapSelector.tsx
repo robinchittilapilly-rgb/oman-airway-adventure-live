@@ -39,15 +39,19 @@ export function SeatMapSelector({
 
   const getSeatStyle = (seat: SeatCell, isSelected: boolean) => {
     if (isSelected) return "bg-primary text-primary-foreground border-primary ring-2 ring-gold";
-    if (seat.kind === "occupied") return "bg-muted text-muted-foreground/50 border-border cursor-not-allowed";
+    if (seat.kind === "occupied")
+      return "bg-muted text-muted-foreground/50 border-border cursor-not-allowed";
     if (seat.kind === "blocked_ffp") {
       return sindbadTier === "Gold"
         ? "bg-gold/25 text-foreground border-gold hover:bg-gold/40"
         : "bg-muted/70 text-muted-foreground border-dashed border-gold/60 cursor-not-allowed";
     }
-    if (seat.kind === "exit") return "bg-warning/20 text-foreground border-warning/70 hover:bg-warning/35";
-    if (seat.kind === "legroom") return "bg-secondary text-secondary-foreground border-primary/50 hover:bg-primary/20";
-    if (seat.kind === "paid") return "bg-card text-foreground border-primary/40 hover:border-primary";
+    if (seat.kind === "exit")
+      return "bg-warning/20 text-foreground border-warning/70 hover:bg-warning/35";
+    if (seat.kind === "legroom")
+      return "bg-secondary text-secondary-foreground border-primary/50 hover:bg-primary/20";
+    if (seat.kind === "paid")
+      return "bg-card text-foreground border-primary/40 hover:border-primary";
     return "bg-success/15 text-foreground border-success/50 hover:bg-success/25";
   };
 
@@ -56,7 +60,9 @@ export function SeatMapSelector({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="font-display text-lg font-bold">
-            {lang === "ar" ? `خريطة المقاعد التفاعلية · ${aircraft}` : `Interactive 2D Seat Map · ${aircraft}`}
+            {lang === "ar"
+              ? `خريطة المقاعد التفاعلية · ${aircraft}`
+              : `Interactive 2D Seat Map · ${aircraft}`}
           </h3>
           <p className="text-xs text-muted-foreground">
             {lang === "ar"
@@ -69,18 +75,37 @@ export function SeatMapSelector({
           </p>
         </div>
         <div className="rounded-lg bg-secondary px-3 py-1.5 text-xs font-bold text-secondary-foreground">
-          {lang === "ar" ? "المحددة:" : "Selected:"} {selectedSeats.length > 0 ? selectedSeats.join(", ") : lang === "ar" ? "لا شيء" : "None"}
+          {lang === "ar" ? "المحددة:" : "Selected:"}{" "}
+          {selectedSeats.length > 0 ? selectedSeats.join(", ") : lang === "ar" ? "لا شيء" : "None"}
         </div>
       </div>
 
       {/* Legend */}
       <div className="mt-4 flex flex-wrap gap-3 text-xs font-medium">
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded border border-success/60 bg-success/15" /> {lang === "ar" ? "مجاني" : "Free"}</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded border border-primary/50 bg-card" /> {lang === "ar" ? "قياسي مدفوع" : "Paid Standard"}</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded border border-primary/60 bg-secondary" /> {lang === "ar" ? "مساحة إضافية" : "Extra Legroom"}</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded border border-warning/70 bg-warning/20" /> {lang === "ar" ? "مخرج الطوارئ" : "Exit Row"}</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded border border-gold bg-gold/25" /> {lang === "ar" ? "أولوية سندباد الذهبية" : "FFP Gold Priority"}</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded border border-border bg-muted" /> {lang === "ar" ? "محجوز" : "Occupied"}</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3.5 w-3.5 rounded border border-success/60 bg-success/15" />{" "}
+          {lang === "ar" ? "مجاني" : "Free"}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3.5 w-3.5 rounded border border-primary/50 bg-card" />{" "}
+          {lang === "ar" ? "قياسي مدفوع" : "Paid Standard"}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3.5 w-3.5 rounded border border-primary/60 bg-secondary" />{" "}
+          {lang === "ar" ? "مساحة إضافية" : "Extra Legroom"}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3.5 w-3.5 rounded border border-warning/70 bg-warning/20" />{" "}
+          {lang === "ar" ? "مخرج الطوارئ" : "Exit Row"}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3.5 w-3.5 rounded border border-gold bg-gold/25" />{" "}
+          {lang === "ar" ? "أولوية سندباد الذهبية" : "FFP Gold Priority"}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-3.5 w-3.5 rounded border border-border bg-muted" />{" "}
+          {lang === "ar" ? "محجوز" : "Occupied"}
+        </span>
       </div>
 
       {/* Fuselage Grid */}
@@ -108,7 +133,10 @@ export function SeatMapSelector({
                   (rowSeats.length === 6 && idx === 2) ||
                   (rowSeats.length === 4 && idx === 1);
 
-                const priceLabel = fee.priceOMR === 0 ? (fee.waivedReason ?? "Free") : formatMoney(fee.priceOMR, currency);
+                const priceLabel =
+                  fee.priceOMR === 0
+                    ? (fee.waivedReason ?? "Free")
+                    : formatMoney(fee.priceOMR, currency);
                 const seatTypeLabel = seat.kind.replace("_", " ");
 
                 return (
@@ -125,7 +153,9 @@ export function SeatMapSelector({
                       <span>{seat.col}</span>
                       {seat.kind !== "occupied" && (
                         <span className="text-[10px] font-normal opacity-85">
-                          {fee.priceOMR === 0 ? "Free" : formatMoney(fee.priceOMR, currency).replace("OMR ", "")}
+                          {fee.priceOMR === 0
+                            ? "Free"
+                            : formatMoney(fee.priceOMR, currency).replace("OMR ", "")}
                         </span>
                       )}
                     </button>

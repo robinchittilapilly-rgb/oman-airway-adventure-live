@@ -15,7 +15,14 @@ export type PassengerRole = "Adult" | "Child" | "Infant" | "Student" | "Senior" 
 export const MAX_TOTAL_PASSENGERS = 12;
 
 export function getTotalPassengers(counts: PassengerCounts): number {
-  return counts.adults + counts.children + counts.infants + counts.students + counts.seniors + counts.labor;
+  return (
+    counts.adults +
+    counts.children +
+    counts.infants +
+    counts.students +
+    counts.seniors +
+    counts.labor
+  );
 }
 
 /**
@@ -40,7 +47,10 @@ export function validatePassengerMix(counts: PassengerCounts): { valid: boolean;
     return { valid: false, error: "Select at least 1 passenger." };
   }
   if (total > MAX_TOTAL_PASSENGERS) {
-    return { valid: false, error: `Maximum ${MAX_TOTAL_PASSENGERS} passengers allowed per online booking.` };
+    return {
+      valid: false,
+      error: `Maximum ${MAX_TOTAL_PASSENGERS} passengers allowed per online booking.`,
+    };
   }
   if (accompanyingAdults < 1 && counts.infants > 0) {
     return { valid: false, error: "Infants must travel with an accompanying adult." };
@@ -57,7 +67,7 @@ export function validatePassengerMix(counts: PassengerCounts): { valid: boolean;
 export function validatePassengerAgeForType(
   dobISO: string,
   role: PassengerRole,
-  travelDateISO: string
+  travelDateISO: string,
 ): { valid: boolean; error?: string } {
   if (!dobISO) return { valid: false, error: "Date of birth is required." };
   const dob = new Date(`${dobISO}T00:00:00Z`);
@@ -188,8 +198,8 @@ export function computeSeatFeeOMR(params: {
   if (params.tier === "Gold") {
     return { priceOMR: 0, waivedReason: "Waived for Sindbad Gold" };
   }
-  const hasSeatBundle = params.selectedBundleIds.some((id) =>
-    VIRTUAL_BUNDLES.find((b) => b.id === id)?.waivesSeatFee
+  const hasSeatBundle = params.selectedBundleIds.some(
+    (id) => VIRTUAL_BUNDLES.find((b) => b.id === id)?.waivesSeatFee,
   );
   if (hasSeatBundle) {
     return { priceOMR: 0, waivedReason: "Included in Virtual Bundle" };
@@ -205,9 +215,12 @@ export function validateIcaoPassenger(p: {
   const errors: string[] = [];
   const icaoName = /^[A-Za-z\s'-]{2,35}$/;
   const icaoPassport = /^[A-Za-z0-9]{6,12}$/;
-  if (!icaoName.test(p.firstName.trim())) errors.push("First name must be 2-35 Latin letters (ICAO standard).");
-  if (!icaoName.test(p.lastName.trim())) errors.push("Last name must be 2-35 Latin letters (ICAO standard).");
-  if (!icaoPassport.test(p.passport.trim())) errors.push("Passport/ID must be 6-12 alphanumeric characters.");
+  if (!icaoName.test(p.firstName.trim()))
+    errors.push("First name must be 2-35 Latin letters (ICAO standard).");
+  if (!icaoName.test(p.lastName.trim()))
+    errors.push("Last name must be 2-35 Latin letters (ICAO standard).");
+  if (!icaoPassport.test(p.passport.trim()))
+    errors.push("Passport/ID must be 6-12 alphanumeric characters.");
   return { valid: errors.length === 0, errors };
 }
 
@@ -257,10 +270,12 @@ export function computeExchangeQuote(params: {
 /**
  * Computes refund eligibility and net refundable amount based on fareBrand refundPolicy (FR-124).
  */
-export function computeRefundQuote(params: {
-  fareBrand: FareBrandId;
-  totalPaidOMR: number;
-}): { cashRefundEligible: boolean; cancellationFeeOMR: number; cashRefundOMR: number; voucherRefundOMR: number } {
+export function computeRefundQuote(params: { fareBrand: FareBrandId; totalPaidOMR: number }): {
+  cashRefundEligible: boolean;
+  cancellationFeeOMR: number;
+  cashRefundOMR: number;
+  voucherRefundOMR: number;
+} {
   const policy = FARE_BRANDS[params.fareBrand].refundPolicy;
   if (policy === "none") {
     // Non-refundable Saver fares cannot refund to original card; Travel Bank retains residual tax credit only.
@@ -339,13 +354,19 @@ export function buildIataBcbpString(params: {
   seat: string;
   seq: number;
 }): string {
-  const nameField = `${params.lastName}/${params.firstName}`.toUpperCase().slice(0, 20).padEnd(20, " ");
+  const nameField = `${params.lastName}/${params.firstName}`
+    .toUpperCase()
+    .slice(0, 20)
+    .padEnd(20, " ");
   const rlocField = params.rloc.toUpperCase().padEnd(7, " ");
   const flightDigits = params.flightNumber.replace(/\D/g, "").padStart(4, "0");
   const parsedDate = new Date(`${params.dateISO}T12:00:00Z`);
   const startOfYear = new Date(Date.UTC(parsedDate.getUTCFullYear(), 0, 0));
   const julianDay = String(
-    Math.max(1, Math.min(366, Math.floor((parsedDate.getTime() - startOfYear.getTime()) / 86400000)))
+    Math.max(
+      1,
+      Math.min(366, Math.floor((parsedDate.getTime() - startOfYear.getTime()) / 86400000)),
+    ),
   ).padStart(3, "0");
   const seatField = params.seat.toUpperCase().padStart(4, "0");
   const seqField = String(params.seq).padStart(4, "0");

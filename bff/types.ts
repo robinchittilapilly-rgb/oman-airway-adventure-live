@@ -14,9 +14,12 @@ export interface BffErrorPayload {
 
 export interface BffSessionUser {
   signedIn: boolean;
-  memberId?: string;
-  memberName?: string;
-  sindbadNo?: string;
+  role: "guest" | "member" | "admin";
+  demoModeEnabled?: boolean | undefined;
+  authProvider?: "demo" | "oidc" | "anonymous" | undefined;
+  memberId?: string | undefined;
+  memberName?: string | undefined;
+  sindbadNo?: string | undefined;
   tier: SindbadTier;
   miles: number;
   tierPoints: number;
@@ -35,6 +38,7 @@ export interface BffSearchRequest {
   multiLeg2Destination?: string | undefined;
   multiLeg2Date?: string | undefined;
   cabin: CabinClass;
+  awardMode?: boolean | undefined;
   passengers: PassengerCounts;
   promoCode?: string | undefined;
   currency?: CurrencyCode | undefined;
@@ -68,6 +72,7 @@ export interface BffBrandedFareQuote {
   taglineAr: string;
   rawPricePerPaxOMR: number;
   discountedPricePerPaxOMR: number;
+  awardMilesPerPax?: number | undefined;
   taxesPerPaxOMR: number;
   earnedMilesPerPax: number;
   checkedBagKg: number;
@@ -83,6 +88,7 @@ export interface BffBrandedFareQuote {
 export interface BffSearchResponse {
   searchId: string;
   cached: boolean;
+  awardMode: boolean;
   routeId: string;
   isLongHaul: boolean;
   baggageGenerousRoute: boolean;
@@ -107,6 +113,8 @@ export interface BffPassengerInput {
   dob: string;
   gender: string;
   passport: string;
+  passportExpiry?: string | undefined;
+  issuingCountry?: string | undefined;
   nationality: string;
   email?: string | undefined;
   phone?: string | undefined;
@@ -117,6 +125,7 @@ export interface BffPassengerInput {
 
 export interface BffCartState {
   cartId: string;
+  ownerSessionId?: string | undefined;
   updatedAt: string;
   step: 1 | 2 | 3 | 4;
   search: BffSearchRequest;
@@ -124,9 +133,11 @@ export interface BffCartState {
   selectedSecondSegId?: string | undefined;
   selectedBrand: FareBrandId;
   selectedSeatIds: string[];
+  selectedReturnSeatIds?: string[] | undefined;
   selectedBundleIds: string[];
   selectedAncillaryIds: string[];
   selectedMealId: string;
+  selectedMealByPax?: string[] | undefined;
   selectedSsrIds: string[];
   insuranceChoice: "unset" | "yes" | "no";
   passengers: BffPassengerInput[];
@@ -154,7 +165,9 @@ export interface BffCartState {
 
 export interface BffCartPricing {
   baseFareOMR: number;
+  awardMilesRequired?: number | undefined;
   taxesOMR: number;
+  taxBreakdown?: { code: string; label: string; amountOMR: number }[] | undefined;
   seatsFeeOMR: number;
   bundlesOMR: number;
   directAncillariesOMR: number;
@@ -190,6 +203,63 @@ export interface BffHandoffPayload {
   rloc: string;
   flow: "checkin" | "manage";
   expiresAt: string;
+}
+
+export interface BffAuditEntry {
+  id: string;
+  eventType: string;
+  actorSessionId?: string | undefined;
+  actorMemberId?: string | undefined;
+  resourceId?: string | undefined;
+  payload: Record<string, unknown>;
+  traceId: string;
+  createdAt: string;
+}
+
+export interface BffCmsArticle {
+  id: string;
+  slug: string;
+  category: "policy" | "baggage" | "advisory" | "destination" | "sindbad";
+  titleEn: string;
+  titleAr: string;
+  bodyEn: string;
+  bodyAr: string;
+  routeLink: string;
+  published: boolean;
+}
+
+export interface BffFeatureFlags {
+  genaiSuhailEnabled: boolean;
+  awardBookingEnabled: boolean;
+  biometricsEnabled: boolean;
+  dynamicBundlesEnabled: boolean;
+  darkSiteEmergencyBanner: boolean;
+}
+
+export interface BffCmsState {
+  version: number;
+  updatedAt: string;
+  updatedBy: string;
+  darkSiteActive: boolean;
+  darkSiteHeadlineEn: string;
+  darkSiteHeadlineAr: string;
+  darkSiteAdvisoryEn: string;
+  darkSiteAdvisoryAr: string;
+  heroTitleEn: string;
+  heroTitleAr: string;
+  heroSubtitleEn: string;
+  heroSubtitleAr: string;
+  featureFlags: BffFeatureFlags;
+  dynamicPromos: Record<string, { discountPct: number; label: string; active: boolean }>;
+  articles: BffCmsArticle[];
+}
+
+export interface BffAiChatResponse {
+  reply: string;
+  provider: "gemini" | "tool-fallback";
+  toolCallsExecuted: { name: string; summary: string }[];
+  suggestedAction?:
+    { label: string; route: "/" | "/manage" | "/checkin" | "/status" | "/sindbad" } | undefined;
 }
 
 export type BookingListItem = SavedBookingPNR;

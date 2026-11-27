@@ -85,10 +85,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Oman Air | Next-Generation Internet Booking Engine" },
-      { name: "description", content: "Book Oman Air flights across 20 global routes, customize branded fares, seats, virtual bundles, manage bookings, and check in online." },
+      {
+        name: "description",
+        content:
+          "Book Oman Air flights across 20 global routes, customize branded fares, seats, virtual bundles, manage bookings, and check in online.",
+      },
       { name: "author", content: "Oman Air" },
       { property: "og:title", content: "Oman Air | Internet Booking Engine" },
-      { property: "og:description", content: "Modern Oman Air flight booking, branded fares, seat selection, ancillaries, Sindbad loyalty, and self-service check-in." },
+      {
+        property: "og:description",
+        content:
+          "Modern Oman Air flight booking, branded fares, seat selection, ancillaries, Sindbad loyalty, and self-service check-in.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -134,8 +142,14 @@ function AppShell() {
   }
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:text-primary-foreground"
+      >
+        Skip to main content
+      </a>
       <Navbar />
-      <main className="flex-1">
+      <main id="main-content" tabIndex={-1} className="flex-1 focus:outline-none">
         <Outlet />
       </main>
       <footer className="border-t border-border bg-teal-deep text-teal-deep-foreground">

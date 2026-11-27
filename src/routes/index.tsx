@@ -1,27 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-  AlertCircle,
-  ArrowRight,
-  Calendar,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  Filter,
-  Plane,
-  Sparkles,
-  Ticket,
-} from "lucide-react";
+import { createFileRoute } from "@tanstack/react-router";
+import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import heroImg from "../assets/oman-air-hero.jpg";
-import studioImg from "../assets/business-studio.jpg";
 import { useIBE } from "../context/IBEContext";
 import {
   AIRPORTS,
   FARE_BRANDS,
-  OMAN_AIR_20_ROUTES,
   findRouteForPair,
-  formatDuration,
   formatMoney,
   generateFlightOptions,
   get30DayFareRepository,
@@ -38,6 +24,7 @@ import {
   type SeatCell,
 } from "../data/ancillariesAndSeats";
 import { bffClient, getStoredCartId, setStoredCartId } from "../lib/bff-client";
+import { trackIbeEvent } from "../lib/analytics";
 import {
   PROMO_CODES,
   calculateSindbadMiles,
@@ -53,19 +40,31 @@ import {
 import { t } from "../lib/i18n";
 import type { BffCartPricing, BffSearchResponse } from "../../bff/types";
 import { FlightSearchWidget, type SearchCriteria } from "../components/ibe/FlightSearchWidget";
+import { BookingStepper } from "../components/ibe/BookingStepper";
+import { FlightResultsStep } from "../components/ibe/FlightResultsStep";
 import { SeatMapSelector } from "../components/ibe/SeatMapSelector";
 import { AncillariesPanel } from "../components/ibe/AncillariesPanel";
 import { PassengerFormStep, type PassengerFormData } from "../components/ibe/PassengerFormStep";
 import { PaymentCheckoutStep, type PaymentMethodId } from "../components/ibe/PaymentCheckoutStep";
+import { BookingConfirmationStep } from "../components/ibe/BookingConfirmationStep";
+import { ExploreRoutesSection } from "../components/ibe/ExploreRoutesSection";
 import { Button } from "../components/ui/button";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Oman Air | Book Flights Across 20 Global Routes" },
-      { name: "description", content: "Search 30-day low fares across 20 Oman Air routes, compare branded fares, choose seats and virtual bundles, and check in seamlessly." },
+      {
+        name: "description",
+        content:
+          "Search 30-day low fares across 20 Oman Air routes, compare branded fares, choose seats and virtual bundles, and check in seamlessly.",
+      },
       { property: "og:title", content: "Oman Air | Book Flights" },
-      { property: "og:description", content: "Oman Air Internet Booking Engine with 30-day fare calendar, Business Studio, and Sindbad rewards." },
+      {
+        property: "og:description",
+        content:
+          "Oman Air Internet Booking Engine with 30-day fare calendar, Business Studio, and Sindbad rewards.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -81,6 +80,7 @@ function Index() {
     lang,
     currency,
     bffConnected,
+    cmsState,
     sindbadSignedIn,
     sindbadTier,
     addBooking,
@@ -103,8 +103,9 @@ function Index() {
   const [nonStopOnly, setNonStopOnly] = useState(false);
   const [regionFilter, setRegionFilter] = useState<string>("All");
 
-  // Step 2: Seats & Ancillaries
+  // Step 2: Multi-segment Seats & Ancillaries
   const [selectedSeats, setSelectedSeats] = useState<SeatCell[]>([]);
+  const [selectedReturnSeats, setSelectedReturnSeats] = useState<SeatCell[]>([]);
   const [selectedBundleIds, setSelectedBundleIds] = useState<string[]>([]);
   const [selectedAncillaryIds, setSelectedAncillaryIds] = useState<string[]>([]);
   const [selectedMealId, setSelectedMealId] = useState<string>("MEAL_STD");
@@ -146,13 +147,14 @@ function Index() {
                 dob: p.dob,
                 gender: p.gender,
                 passport: p.passport,
+                passportExpiry: p.passportExpiry ?? "2030-05-14",
                 nationality: p.nationality,
                 email: p.email ?? "",
                 phone: p.phone ?? "",
                 emergencyName: p.emergencyName ?? "",
                 emergencyPhone: p.emergencyPhone ?? "",
                 sindbadNo: p.sindbadNo ?? "",
-              }))
+              })),
             );
           }
         })
@@ -172,6 +174,7 @@ function Index() {
         selectedReturnId?: string;
         selectedBrand?: FareBrandId;
         selectedSeats?: SeatCell[];
+        selectedReturnSeats?: SeatCell[];
         selectedBundleIds?: string[];
         selectedAncillaryIds?: string[];
         selectedMealId?: string;
@@ -186,6 +189,7 @@ function Index() {
         if (draft.selectedReturnId) setSelectedReturnId(draft.selectedReturnId);
         if (draft.selectedBrand) setSelectedBrand(draft.selectedBrand);
         if (draft.selectedSeats) setSelectedSeats(draft.selectedSeats);
+        if (draft.selectedReturnSeats) setSelectedReturnSeats(draft.selectedReturnSeats);
         if (draft.selectedBundleIds) setSelectedBundleIds(draft.selectedBundleIds);
         if (draft.selectedAncillaryIds) setSelectedAncillaryIds(draft.selectedAncillaryIds);
         if (draft.selectedMealId) setSelectedMealId(draft.selectedMealId);
@@ -224,6 +228,7 @@ function Index() {
               selectedSecondSegId: selectedReturnId || undefined,
               selectedBrand,
               selectedSeatIds: selectedSeats.map((s) => s.id),
+              selectedReturnSeatIds: selectedReturnSeats.map((s) => s.id),
               selectedBundleIds,
               selectedAncillaryIds,
               selectedMealId,
@@ -231,7 +236,7 @@ function Index() {
               insuranceChoice,
               passengers: paxForms,
             },
-            lang
+            lang,
           )
           .then(({ cart }) => {
             setCartId(cart.cartId);
@@ -255,13 +260,14 @@ function Index() {
           selectedReturnId,
           selectedBrand,
           selectedSeats,
+          selectedReturnSeats,
           selectedBundleIds,
           selectedAncillaryIds,
           selectedMealId,
           selectedSsrIds,
           insuranceChoice,
           paxForms,
-        })
+        }),
       );
     } catch {
       // ignore storage errors
@@ -277,6 +283,7 @@ function Index() {
     selectedReturnId,
     selectedBrand,
     selectedSeats,
+    selectedReturnSeats,
     selectedBundleIds,
     selectedAncillaryIds,
     selectedMealId,
@@ -318,10 +325,14 @@ function Index() {
   }, [search, thirtyDayFares]);
 
   const outboundOptions = useMemo<FlightOption[]>(() => {
-    const source = bffSearchData?.outboundOptions ?? (search ? generateFlightOptions(search.origin, search.destination, search.departDate) : []);
+    const source =
+      bffSearchData?.outboundOptions ??
+      (search ? generateFlightOptions(search.origin, search.destination, search.departDate) : []);
     const list = source.filter((f) => (!nonStopOnly ? true : f.stops === 0));
     return [...list].sort((a, b) =>
-      sortBy === "duration" ? a.durationMinutes - b.durationMinutes : a.priceMultiplier - b.priceMultiplier
+      sortBy === "duration"
+        ? a.durationMinutes - b.durationMinutes
+        : a.priceMultiplier - b.priceMultiplier,
     );
   }, [bffSearchData, search, nonStopOnly, sortBy]);
 
@@ -331,10 +342,16 @@ function Index() {
       bffSearchData?.secondSegmentOptions ??
       (search.tripType === "roundtrip"
         ? generateFlightOptions(search.destination, search.origin, search.returnDate)
-        : generateFlightOptions(search.multiLeg2Origin, search.multiLeg2Destination, search.multiLeg2Date));
+        : generateFlightOptions(
+            search.multiLeg2Origin,
+            search.multiLeg2Destination,
+            search.multiLeg2Date,
+          ));
     const filtered = source.filter((f) => (!nonStopOnly ? true : f.stops === 0));
     return [...filtered].sort((a, b) =>
-      sortBy === "duration" ? a.durationMinutes - b.durationMinutes : a.priceMultiplier - b.priceMultiplier
+      sortBy === "duration"
+        ? a.durationMinutes - b.durationMinutes
+        : a.priceMultiplier - b.priceMultiplier,
     );
   }, [bffSearchData, search, nonStopOnly, sortBy]);
 
@@ -342,7 +359,6 @@ function Index() {
     outboundOptions.find((o) => o.id === selectedOutboundId) ?? outboundOptions[0] ?? null;
   const selectedSecondSeg =
     secondSegmentOptions.find((o) => o.id === selectedReturnId) ?? secondSegmentOptions[0] ?? null;
-
   const totalPax = search ? getTotalPassengers(search.passengers) : 1;
 
   const handleRunSearch = async (criteria: SearchCriteria) => {
@@ -350,25 +366,30 @@ function Index() {
     setBffPricing(null);
     setCartId(null);
     setStoredCartId(null);
+    trackIbeEvent("view_item_list", {
+      origin: criteria.origin,
+      destination: criteria.destination,
+      tripType: criteria.tripType,
+      awardMode: Boolean(criteria.awardMode),
+    });
 
     let outOpts = generateFlightOptions(criteria.origin, criteria.destination, criteria.departDate);
     let secOpts =
       criteria.tripType === "roundtrip"
         ? generateFlightOptions(criteria.destination, criteria.origin, criteria.returnDate)
         : criteria.tripType === "multicity"
-          ? generateFlightOptions(criteria.multiLeg2Origin, criteria.multiLeg2Destination, criteria.multiLeg2Date)
+          ? generateFlightOptions(
+              criteria.multiLeg2Origin,
+              criteria.multiLeg2Destination,
+              criteria.multiLeg2Date,
+            )
           : [];
 
     if (bffConnected) {
       try {
         const res = await bffClient.searchFlights(
-          {
-            ...criteria,
-            currency,
-            nonStopOnly,
-            sortBy,
-          },
-          lang
+          { ...criteria, currency, nonStopOnly, sortBy },
+          lang,
         );
         setBffSearchData(res);
         outOpts = res.outboundOptions;
@@ -382,76 +403,85 @@ function Index() {
 
     setSelectedOutboundId(outOpts[0]?.id ?? "");
     setSelectedReturnId(secOpts[0]?.id ?? "");
-
-    const defaultBrand: FareBrandId =
+    setSelectedBrand(
       criteria.cabin === "studio"
         ? "BIZ_STUDIO"
         : criteria.cabin === "business"
           ? "BIZ_COMFORT"
-          : "ECO_COMFORT";
-    setSelectedBrand(defaultBrand);
+          : "ECO_COMFORT",
+    );
     setSelectedSeats([]);
+    setSelectedReturnSeats([]);
     setSelectedBundleIds([]);
     setSelectedAncillaryIds([]);
     setInsuranceChoice("unset");
 
     const roles = expandPassengerTypes(criteria.passengers);
-    const forms: PassengerFormData[] = roles.map((role, i) => {
-      const saved = sindbadSignedIn && i === 0 ? SINDBAD_SAVED_TRAVELERS[0] : undefined;
-      const defaultDob =
-        role === "Infant"
-          ? getDateISO(-365)
-          : role === "Child"
-            ? "2018-06-15"
-            : role === "Senior"
-              ? "1960-03-10"
-              : "1996-05-14";
-      return {
-        role,
-        firstName: saved?.firstName ?? "",
-        lastName: saved?.lastName ?? "",
-        dob: saved && role !== "Infant" && role !== "Child" && role !== "Senior" ? saved.dob : defaultDob,
-        gender: saved?.gender ?? "M",
-        passport: saved?.passport ?? "",
-        nationality: saved?.nationality ?? "Oman",
-        email: sindbadSignedIn && i === 0 ? "tariq.albalushi@oman.om" : "",
-        phone: sindbadSignedIn && i === 0 ? "+968 9123 4567" : "",
-        emergencyName: sindbadSignedIn && i === 0 ? "Salim Al-Balushi" : "",
-        emergencyPhone: sindbadSignedIn && i === 0 ? "+968 9988 1122" : "",
-        sindbadNo: saved?.sindbadNo ?? "",
-      };
-    });
-    setPaxForms(forms);
+    setPaxForms(
+      roles.map((role, i) => {
+        const saved = sindbadSignedIn && i === 0 ? SINDBAD_SAVED_TRAVELERS[0] : undefined;
+        const defaultDob =
+          role === "Infant"
+            ? getDateISO(-365)
+            : role === "Child"
+              ? "2018-06-15"
+              : role === "Senior"
+                ? "1960-03-10"
+                : "1996-05-14";
+        return {
+          role,
+          firstName: saved?.firstName ?? "",
+          lastName: saved?.lastName ?? "",
+          dob:
+            saved && role !== "Infant" && role !== "Child" && role !== "Senior"
+              ? saved.dob
+              : defaultDob,
+          gender: saved?.gender ?? "M",
+          passport: saved?.passport ?? "",
+          passportExpiry: "2030-05-14",
+          nationality: saved?.nationality ?? "Oman",
+          email: sindbadSignedIn && i === 0 ? "tariq.albalushi@oman.om" : "",
+          phone: sindbadSignedIn && i === 0 ? "+968 9123 4567" : "",
+          emergencyName: sindbadSignedIn && i === 0 ? "Salim Al-Balushi" : "",
+          emergencyPhone: sindbadSignedIn && i === 0 ? "+968 9988 1122" : "",
+          sindbadNo: saved?.sindbadNo ?? "",
+        };
+      }),
+    );
     setStep(1);
   };
 
   const visibleBrands: FareBrandId[] = useMemo(() => {
     if (!routeMatch) return ["ECO_SAVER", "ECO_COMFORT", "ECO_FLEX"];
-    if (search?.cabin === "studio" && routeMatch.route.hasStudio) return ["BIZ_COMFORT", "BIZ_FLEX", "BIZ_STUDIO"];
+    if (search?.cabin === "studio" && routeMatch.route.hasStudio)
+      return ["BIZ_COMFORT", "BIZ_FLEX", "BIZ_STUDIO"];
     if (search?.cabin === "business") {
-      return routeMatch.route.hasStudio ? ["BIZ_COMFORT", "BIZ_FLEX", "BIZ_STUDIO"] : ["BIZ_COMFORT", "BIZ_FLEX"];
+      return routeMatch.route.hasStudio
+        ? ["BIZ_COMFORT", "BIZ_FLEX", "BIZ_STUDIO"]
+        : ["BIZ_COMFORT", "BIZ_FLEX"];
     }
     return ["ECO_SAVER", "ECO_COMFORT", "ECO_FLEX"];
   }, [routeMatch, search?.cabin]);
 
   const computeBrandPricePerPaxOMR = (brandId: FareBrandId): number => {
     const outPrice = Math.round(
-      (activeDayFare?.pricesOMR[brandId] ?? 0) * (selectedOutbound?.priceMultiplier ?? 1)
+      (activeDayFare?.pricesOMR[brandId] ?? 0) * (selectedOutbound?.priceMultiplier ?? 1),
     );
     if (!search || search.tripType === "oneway") return outPrice;
     if (search.tripType === "roundtrip") {
       const retBase = returnDayFare?.pricesOMR[brandId] ?? activeDayFare?.pricesOMR[brandId] ?? 0;
-      const retPrice = Math.round(retBase * (selectedSecondSeg?.priceMultiplier ?? 1));
-      return outPrice + retPrice;
+      return outPrice + Math.round(retBase * (selectedSecondSeg?.priceMultiplier ?? 1));
     }
     const leg2Base = leg2DayFare?.pricesOMR[brandId] ?? activeDayFare?.pricesOMR[brandId] ?? 0;
-    const leg2Price = Math.round(leg2Base * (selectedSecondSeg?.priceMultiplier ?? 1));
-    return outPrice + leg2Price;
+    return outPrice + Math.round(leg2Base * (selectedSecondSeg?.priceMultiplier ?? 1));
   };
 
   const promoEntry = search?.promoCode ? PROMO_CODES[search.promoCode] : undefined;
-  const fallbackBaseFarePerPaxOMR = computeBrandPricePerPaxOMR(selectedBrand);
-  const fallbackBaseFareOMR = fallbackBaseFarePerPaxOMR * totalPax;
+  const fallbackRawFareOMR = computeBrandPricePerPaxOMR(selectedBrand) * totalPax;
+  const fallbackBaseFareOMR = search?.awardMode ? 0 : fallbackRawFareOMR;
+  const fallbackAwardMilesRequired = search?.awardMode
+    ? Math.max(4500, Math.round(computeBrandPricePerPaxOMR(selectedBrand) * 120)) * totalPax
+    : 0;
   const leg2TaxOMR =
     search?.tripType === "roundtrip"
       ? (routeMatch?.route.taxesOMR ?? 0)
@@ -460,58 +490,68 @@ function Index() {
         : 0;
   const fallbackTaxesOMR = ((routeMatch?.route.taxesOMR ?? 0) + leg2TaxOMR) * totalPax;
 
-  const seatsFeeOMR = selectedSeats.reduce((sum, s) => {
-    return (
-      sum +
-      computeSeatFeeOMR({
-        baseSeatPriceOMR: s.priceOMR,
-        fareBrand: selectedBrand,
-        tier: sindbadTier,
-        selectedBundleIds,
-      }).priceOMR
+  const seatFeeCalc = (seatsList: SeatCell[]) =>
+    seatsList.reduce(
+      (sum, s) =>
+        sum +
+        computeSeatFeeOMR({
+          baseSeatPriceOMR: s.priceOMR,
+          fareBrand: selectedBrand,
+          tier: sindbadTier,
+          selectedBundleIds,
+        }).priceOMR,
+      0,
     );
-  }, 0);
 
-  const bundlesOMR = selectedBundleIds.reduce((sum, id) => {
-    return sum + (VIRTUAL_BUNDLES.find((b) => b.id === id)?.priceOMR ?? 0) * totalPax;
-  }, 0);
+  const fallbackAncillariesOMR =
+    seatFeeCalc(selectedSeats) +
+    seatFeeCalc(selectedReturnSeats) +
+    selectedBundleIds.reduce(
+      (sum, id) => sum + (VIRTUAL_BUNDLES.find((b) => b.id === id)?.priceOMR ?? 0) * totalPax,
+      0,
+    ) +
+    selectedAncillaryIds.reduce(
+      (sum, id) =>
+        sum +
+        computeAncillaryPriceOMR({ ancillaryId: id, tier: sindbadTier, selectedBundleIds })
+          .priceOMR *
+          totalPax,
+      0,
+    ) +
+    (MEAL_OPTIONS.find((m) => m.id === selectedMealId)?.priceOMR ?? 0) * totalPax +
+    (insuranceChoice === "yes" ? 12 * totalPax : 0);
 
-  const directAncOMR = selectedAncillaryIds.reduce((sum, id) => {
-    return (
-      sum +
-      computeAncillaryPriceOMR({
-        ancillaryId: id,
-        tier: sindbadTier,
-        selectedBundleIds,
-      }).priceOMR *
-        totalPax
-    );
-  }, 0);
-
-  const mealOMR = (MEAL_OPTIONS.find((m) => m.id === selectedMealId)?.priceOMR ?? 0) * totalPax;
-  const insuranceOMR = insuranceChoice === "yes" ? 12 * totalPax : 0;
-  const fallbackAncillariesOMR = seatsFeeOMR + bundlesOMR + directAncOMR + mealOMR + insuranceOMR;
-  const fallbackPromoDiscountOMR = promoEntry ? Math.round(fallbackBaseFareOMR * (promoEntry.discountPct / 100)) : 0;
-  const fallbackTotalOMR = Math.max(0, fallbackBaseFareOMR + fallbackTaxesOMR + fallbackAncillariesOMR - fallbackPromoDiscountOMR);
-  const fallbackEarnedMiles = calculateSindbadMiles(
-    Math.max(0, fallbackBaseFareOMR - fallbackPromoDiscountOMR) + fallbackAncillariesOMR,
-    sindbadTier
+  const fallbackPromoDiscountOMR =
+    promoEntry && !search?.awardMode
+      ? Math.round(fallbackBaseFareOMR * (promoEntry.discountPct / 100))
+      : 0;
+  const fallbackTotalOMR = Math.max(
+    0,
+    fallbackBaseFareOMR + fallbackTaxesOMR + fallbackAncillariesOMR - fallbackPromoDiscountOMR,
   );
+  const fallbackEarnedMiles = search?.awardMode
+    ? calculateSindbadMiles(fallbackAncillariesOMR, sindbadTier)
+    : calculateSindbadMiles(
+        Math.max(0, fallbackBaseFareOMR - fallbackPromoDiscountOMR) + fallbackAncillariesOMR,
+        sindbadTier,
+      );
 
-  // Authoritative BFF pricing takes precedence when connected
   const baseFareOMR = bffPricing?.baseFareOMR ?? fallbackBaseFareOMR;
+  const awardMilesRequired = bffPricing?.awardMilesRequired ?? fallbackAwardMilesRequired;
   const taxesOMR = bffPricing?.taxesOMR ?? fallbackTaxesOMR;
+  const taxBreakdown = bffPricing?.taxBreakdown;
   const ancillariesOMR = bffPricing?.ancillariesOMR ?? fallbackAncillariesOMR;
   const promoDiscountOMR = bffPricing?.promoDiscountOMR ?? fallbackPromoDiscountOMR;
   const totalOMR = bffPricing?.totalOMR ?? fallbackTotalOMR;
   const earnedMiles = bffPricing?.earnedMiles ?? fallbackEarnedMiles;
 
-  const handleToggleSeat = (seat: SeatCell) => {
-    setSelectedSeats((prev) => {
+  const toggleSeatIn = (
+    setter: React.Dispatch<React.SetStateAction<SeatCell[]>>,
+    seat: SeatCell,
+  ) => {
+    setter((prev) => {
       if (prev.some((s) => s.id === seat.id)) return prev.filter((s) => s.id !== seat.id);
-      if (prev.length >= totalPax) {
-        return [...prev.slice(1), seat];
-      }
+      if (prev.length >= totalPax) return [...prev.slice(1), seat];
       return [...prev, seat];
     });
   };
@@ -521,6 +561,11 @@ function Index() {
       toast.error("Please select Yes or No for Oman Air Travel Protection before continuing.");
       return;
     }
+    trackIbeEvent("add_to_cart", {
+      route: routeMatch?.route.id,
+      fareBrand: selectedBrand,
+      totalOMR,
+    });
     setStep(3);
   };
 
@@ -528,7 +573,11 @@ function Index() {
     if (!search) return;
     for (let i = 0; i < paxForms.length; i++) {
       const p = paxForms[i]!;
-      const check = validateIcaoPassenger({ firstName: p.firstName, lastName: p.lastName, passport: p.passport });
+      const check = validateIcaoPassenger({
+        firstName: p.firstName,
+        lastName: p.lastName,
+        passport: p.passport,
+      });
       if (!check.valid) {
         toast.error(`Passenger ${i + 1}: ${check.errors[0]}`);
         return;
@@ -539,6 +588,11 @@ function Index() {
         return;
       }
     }
+    trackIbeEvent("begin_checkout", {
+      route: routeMatch?.route.id,
+      totalOMR,
+      awardMode: Boolean(search.awardMode),
+    });
     setStep(4);
   };
 
@@ -555,7 +609,6 @@ function Index() {
 
     if (bffConnected && cartId) {
       try {
-        // Ensure latest passenger form edits are synced before checkout
         const synced = await bffClient.syncCart(
           {
             cartId,
@@ -565,6 +618,7 @@ function Index() {
             selectedSecondSegId: selectedSecondSeg?.id,
             selectedBrand,
             selectedSeatIds: selectedSeats.map((s) => s.id),
+            selectedReturnSeatIds: selectedReturnSeats.map((s) => s.id),
             selectedBundleIds,
             selectedAncillaryIds,
             selectedMealId,
@@ -572,7 +626,7 @@ function Index() {
             insuranceChoice,
             passengers: paxForms,
           },
-          lang
+          lang,
         );
         const res = await bffClient.checkoutCart(
           synced.cart.cartId,
@@ -585,7 +639,7 @@ function Index() {
             useMilesSplit: details.milesUsed > 0,
             useTravelBank: details.travelBankUsedOMR > 0,
           },
-          lang
+          lang,
         );
         addBooking(res.booking);
         syncFromBffUser(res.session);
@@ -594,6 +648,12 @@ function Index() {
         setConfirmedRloc(res.booking.rloc);
         setConfirmedMode(details.mode);
         setStep(5);
+        trackIbeEvent("purchase", {
+          transaction_id: res.booking.rloc,
+          value: res.finalCashOMR,
+          currency: "OMR",
+          milesUsed: res.milesUsed,
+        });
         toast.success(`PNR ${res.booking.rloc} committed via BFF!`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "BFF checkout failed.");
@@ -606,19 +666,10 @@ function Index() {
     if (details.mode === "pay" && sindbadSignedIn) addMiles(earnedMiles);
 
     const rloc = generateRLOC();
-    const ancNames = [
-      ...selectedBundleIds.map((id) => VIRTUAL_BUNDLES.find((b) => b.id === id)?.name ?? id),
-      ...selectedAncillaryIds.map((id) => DIRECT_ANCILLARIES.find((a) => a.id === id)?.name ?? id),
-      ...(insuranceChoice === "yes" ? ["Travel Protection Insurance"] : []),
-    ];
-    const ssrs = selectedSsrIds.map((id) => {
-      const s = SSR_OPTIONS.find((x) => x.id === id)!;
-      return { code: s.code, name: s.name, status: s.status };
-    });
-
     addBooking({
       rloc,
       status: details.mode === "hold" ? "HELD" : "CONFIRMED",
+      ...(details.mode === "hold" ? { heldBalanceDueOMR: totalOMR } : {}),
       origin: search.origin,
       destination: search.destination,
       flightNumber: selectedOutbound.flightNumber,
@@ -645,15 +696,27 @@ function Index() {
         type: p.role,
         passport: p.passport,
         seat: selectedSeats[idx]?.id ?? `${15 + idx}A`,
+        ...(selectedReturnSeats[idx]?.id ? { returnSeat: selectedReturnSeats[idx]!.id } : {}),
         checkedIn: false,
       })),
-      ancillaries: ancNames,
-      ssrs,
+      ancillaries: [
+        ...selectedBundleIds.map((id) => VIRTUAL_BUNDLES.find((b) => b.id === id)?.name ?? id),
+        ...selectedAncillaryIds.map(
+          (id) => DIRECT_ANCILLARIES.find((a) => a.id === id)?.name ?? id,
+        ),
+        ...(insuranceChoice === "yes" ? ["Travel Protection Insurance"] : []),
+      ],
+      ssrs: selectedSsrIds.map((id) => {
+        const s = SSR_OPTIONS.find((x) => x.id === id)!;
+        return { code: s.code, name: s.name, status: s.status };
+      }),
       totalPaidOMR: details.finalCashOMR,
       paymentMethod: details.paymentLabel,
       gate: "A09",
       terminal: "T1",
-      ...(details.mode === "hold" ? { holdExpiresAt: computeHoldExpiryISO(details.holdHours ?? 24) } : {}),
+      ...(details.mode === "hold"
+        ? { holdExpiresAt: computeHoldExpiryISO(details.holdHours ?? 24) }
+        : {}),
     });
 
     setConfirmedRloc(rloc);
@@ -662,21 +725,21 @@ function Index() {
     toast.success(`Demo PNR ${rloc} saved to Manage My Booking & Check-in!`);
   };
 
-  const filtered20Routes = useMemo(() => {
-    return OMAN_AIR_20_ROUTES.filter((r) => {
-      if (regionFilter === "All") return true;
-      const dest = AIRPORTS.find((a) => a.code === r.destination);
-      return dest?.region === regionFilter;
-    });
-  }, [regionFilter]);
-
   const nearbyAltCodes =
     bffSearchData?.nearbyAlternatives ??
-    (search ? AIRPORTS.find((a) => a.code === search.destination)?.nearbyCodes ?? [] : []);
+    (search ? (AIRPORTS.find((a) => a.code === search.destination)?.nearbyCodes ?? []) : []);
+
+  const heroTitle =
+    lang === "ar"
+      ? (cmsState?.heroTitleAr ?? copy.hero.title)
+      : (cmsState?.heroTitleEn ?? copy.hero.title);
+  const heroSubtitle =
+    lang === "ar"
+      ? (cmsState?.heroSubtitleAr ?? copy.hero.subtitle)
+      : (cmsState?.heroSubtitleEn ?? copy.hero.subtitle);
 
   return (
     <div>
-      {/* Expressive Full-Bleed Hero */}
       <section className="relative overflow-hidden">
         <img
           src={heroImg}
@@ -694,10 +757,10 @@ function Index() {
             {bffConnected && " · BFF Active"}
           </p>
           <h1 className="mt-4 max-w-3xl font-display text-4xl font-extrabold tracking-tight text-primary-foreground sm:text-6xl">
-            {copy.hero.title}
+            {heroTitle}
           </h1>
           <p className="mt-3 max-w-xl text-sm text-primary-foreground/85 sm:text-base">
-            {copy.hero.subtitle}
+            {heroSubtitle}
           </p>
 
           <div className="mt-8">
@@ -706,335 +769,81 @@ function Index() {
         </div>
       </section>
 
-      {/* Active IBE Booking Funnel */}
       {step > 0 && search && routeMatch && (
         <section id="booking-workspace" className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-          <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-5 py-3.5">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-              {[
-                { n: 1, label: "1. Flights & Brands" },
-                { n: 2, label: "2. Seats & Bundles" },
-                { n: 3, label: "3. Passengers & APIS" },
-                { n: 4, label: "4. Review & Pay" },
-                { n: 5, label: "5. Confirmed" },
-              ].map((s) => (
-                <button
-                  key={s.n}
-                  type="button"
-                  disabled={s.n > step || step === 5}
-                  onClick={() => setStep(s.n as FunnelStep)}
-                  className={`rounded-lg px-3 py-1.5 transition-colors ${
-                    step === s.n
-                      ? "bg-primary text-primary-foreground"
-                      : s.n < step
-                        ? "bg-success/15 text-success hover:bg-success/25"
-                        : "text-muted-foreground"
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            <div className="text-xs font-bold text-primary">
-              {search.origin} → {search.destination} · {search.departDate} · {totalPax} guest(s)
-              {bffConnected && cartId ? ` · Cart ${cartId.slice(0, 10)}` : ""}
-            </div>
-          </div>
+          <BookingStepper
+            step={step as 1 | 2 | 3 | 4 | 5}
+            origin={search.origin}
+            destination={search.destination}
+            departDate={search.departDate}
+            totalPax={totalPax}
+            bffConnected={bffConnected}
+            cartId={cartId}
+            onSelectStep={setStep}
+          />
 
           {step === 1 && (
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-border bg-card p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="flex items-center gap-2 font-display text-lg font-bold">
-                    <Calendar className="h-5 w-5 text-primary" />
-                    30-Day Low Fare Calendar ({routeMatch.route.id})
-                  </h2>
-                  <span className="text-xs text-muted-foreground">
-                    {bffSearchData
-                      ? `Served via BFF ${bffSearchData.cached ? "(Fare Cache Hit)" : "(PSS Adapter)"}`
-                      : `Showing ${FARE_BRANDS[selectedBrand].name} outbound prices`}
-                  </span>
-                </div>
-                <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
-                  {thirtyDayFares.map((day) => {
-                    const active = day.dateISO === search.departDate;
-                    return (
-                      <button
-                        key={day.dateISO}
-                        type="button"
-                        onClick={() => setSearch({ ...search, departDate: day.dateISO })}
-                        className={`flex min-w-[96px] shrink-0 flex-col items-center rounded-xl border px-3 py-2 text-center transition-all ${
-                          active
-                            ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                            : day.soldOut
-                              ? "border-destructive/30 bg-destructive/5 text-destructive"
-                              : "border-border bg-background hover:border-primary"
-                        }`}
-                      >
-                        <span className="text-xs font-semibold opacity-85">{day.dateISO.slice(5)}</span>
-                        <span className="mt-0.5 font-display text-xs font-bold">
-                          {day.soldOut ? "Sold Out" : formatMoney(day.pricesOMR[selectedBrand], currency)}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {activeDayFare?.soldOut ? (
-                <div className="rounded-2xl border border-warning bg-warning/15 p-6">
-                  <div className="flex items-start gap-3">
-                    <AlertCircle className="mt-0.5 h-5 w-5 text-warning-foreground" />
-                    <div>
-                      <h3 className="font-display text-lg font-bold">Flights on {search.departDate} are Sold Out</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Choose an alternative date or switch to a nearby airport with seats available:
-                      </p>
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {thirtyDayFares
-                          .filter((d) => !d.soldOut)
-                          .slice(0, 4)
-                          .map((alt) => (
-                            <Button
-                              key={alt.dateISO}
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => setSearch({ ...search, departDate: alt.dateISO })}
-                            >
-                              {alt.dateISO} · {formatMoney(alt.pricesOMR[selectedBrand], currency)}
-                            </Button>
-                          ))}
-                        {nearbyAltCodes.map((code) => (
-                          <Button
-                            key={code}
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setSearch({ ...search, destination: code })}
-                          >
-                            Try nearby {code}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/50 px-4 py-2.5 text-xs">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex items-center gap-1 font-semibold"><Filter className="h-3.5 w-3.5" /> Filters:</span>
-                      <label htmlFor="filter-nonstop" className="inline-flex cursor-pointer items-center gap-1.5">
-                        <input
-                          id="filter-nonstop"
-                          type="checkbox"
-                          checked={nonStopOnly}
-                          onChange={(e) => setNonStopOnly(e.target.checked)}
-                        />
-                        Non-stop only ({outboundOptions.length} shown)
-                      </label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label htmlFor="sort-results" className="text-muted-foreground">Sort:</label>
-                      <select
-                        id="sort-results"
-                        value={sortBy}
-                        onChange={(e) => setSortBy(e.target.value as "price" | "duration")}
-                        className="rounded-md border border-border bg-card px-2 py-1 font-semibold"
-                      >
-                        <option value="price">Lowest Price</option>
-                        <option value="duration">Shortest Duration</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-border bg-card p-5 space-y-5">
-                    <div>
-                      <h3 className="font-display text-base font-bold">
-                        Select Outbound Flight ({search.origin} → {search.destination} · {search.departDate})
-                      </h3>
-                      {outboundOptions.length === 0 ? (
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          No non-stop flights match this filter. Uncheck "Non-stop only" to view connecting itineraries.
-                        </p>
-                      ) : (
-                        <div className="mt-3 grid gap-3 md:grid-cols-3">
-                          {outboundOptions.map((opt) => {
-                            const active = selectedOutbound?.id === opt.id;
-                            const estPrice = Math.round((activeDayFare?.pricesOMR[selectedBrand] ?? 0) * opt.priceMultiplier);
-                            return (
-                              <button
-                                key={opt.id}
-                                type="button"
-                                onClick={() => setSelectedOutboundId(opt.id)}
-                                className={`flex flex-col justify-between rounded-xl border p-4 text-start transition-all ${
-                                  active ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/50"
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="inline-flex items-center gap-1.5 font-display text-sm font-bold text-primary">
-                                    <Plane className="h-4 w-4" /> {opt.flightNumber}
-                                  </span>
-                                  <span className="rounded bg-secondary px-2 py-0.5 text-xs font-semibold">
-                                    {opt.stopLabel}
-                                  </span>
-                                </div>
-                                <div className="mt-2">
-                                  <p className="font-display text-lg font-extrabold">
-                                    {opt.departureTime} → {opt.arrivalTime}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {formatDuration(opt.durationMinutes)} · {opt.aircraft}
-                                    {opt.codesharePartner ? ` · ${opt.codesharePartner}` : ""}
-                                  </p>
-                                </div>
-                                <div className="mt-3 flex items-center justify-between border-t border-border pt-2 text-xs">
-                                  <span className="font-semibold text-warning-foreground">{opt.seatsRemaining} seats left</span>
-                                  <span className="font-display font-bold text-primary">{formatMoney(estPrice, currency)}</span>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {search.tripType !== "oneway" && secondSegmentOptions.length > 0 && (
-                      <div className="border-t border-border pt-5">
-                        <h3 className="font-display text-base font-bold">
-                          {search.tripType === "roundtrip"
-                            ? `Select Return Flight (${search.destination} → ${search.origin} · ${search.returnDate})`
-                            : `Select Leg 2 Flight (${search.multiLeg2Origin} → ${search.multiLeg2Destination} · ${search.multiLeg2Date})`}
-                        </h3>
-                        <div className="mt-3 grid gap-3 md:grid-cols-3">
-                          {secondSegmentOptions.map((opt) => {
-                            const active = selectedSecondSeg?.id === opt.id;
-                            const legBase =
-                              (search.tripType === "roundtrip"
-                                ? returnDayFare?.pricesOMR[selectedBrand]
-                                : leg2DayFare?.pricesOMR[selectedBrand]) ??
-                              activeDayFare?.pricesOMR[selectedBrand] ??
-                              0;
-                            const estPrice = Math.round(legBase * opt.priceMultiplier);
-                            return (
-                              <button
-                                key={opt.id}
-                                type="button"
-                                onClick={() => setSelectedReturnId(opt.id)}
-                                className={`flex flex-col justify-between rounded-xl border p-4 text-start transition-all ${
-                                  active ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/50"
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-display text-sm font-bold text-primary">{opt.flightNumber}</span>
-                                  <span className="rounded bg-secondary px-2 py-0.5 text-xs font-semibold">{opt.stopLabel}</span>
-                                </div>
-                                <div className="mt-2">
-                                  <p className="font-display text-lg font-extrabold">
-                                    {opt.departureTime} → {opt.arrivalTime}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {formatDuration(opt.durationMinutes)} · {opt.aircraft}
-                                  </p>
-                                </div>
-                                <div className="mt-3 flex items-center justify-between border-t border-border pt-2 text-xs">
-                                  <span>{opt.origin} → {opt.destination}</span>
-                                  <span className="font-display font-bold text-primary">+{formatMoney(estPrice, currency)}</span>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {selectedOutbound && (
-                      <div className="border-t border-border pt-5">
-                        <h3 className="font-display text-base font-bold">Compare Branded Fares</h3>
-                        <div className="mt-4 grid gap-4 md:grid-cols-3">
-                          {visibleBrands.map((brandId) => {
-                            const spec = FARE_BRANDS[brandId];
-                            const rawPriceOMR = computeBrandPricePerPaxOMR(brandId);
-                            const discountedOMR = promoEntry
-                              ? Math.round(rawPriceOMR * (1 - promoEntry.discountPct / 100))
-                              : rawPriceOMR;
-                            const active = selectedBrand === brandId;
-                            const miles = calculateSindbadMiles(discountedOMR, sindbadTier);
-                            return (
-                              <button
-                                key={brandId}
-                                type="button"
-                                onClick={() => setSelectedBrand(brandId)}
-                                className={`flex flex-col justify-between rounded-2xl border-2 p-5 text-start transition-all ${
-                                  active
-                                    ? "border-primary bg-primary/5 shadow-md"
-                                    : "border-border bg-background hover:border-primary/50"
-                                }`}
-                              >
-                                <div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-display text-base font-bold">
-                                      {lang === "ar" ? spec.nameAr : spec.name}
-                                    </span>
-                                    {active && <CheckCircle2 className="h-5 w-5 text-primary" />}
-                                  </div>
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    {lang === "ar" ? spec.taglineAr : spec.tagline}
-                                  </p>
-
-                                  <ul className="mt-4 space-y-1.5 text-xs">
-                                    <li>• Checked Bag: <strong>{spec.checkedBagKg} kg</strong> (+{sindbadTier === "Gold" ? 15 : sindbadTier === "Silver" ? 10 : 0} kg {sindbadTier})</li>
-                                    <li>• Cabin Bag: <strong>{spec.cabinBagText}</strong></li>
-                                    <li>• Seat Selection: <strong>{spec.seatSelection === "free" || sindbadTier === "Gold" ? "Complimentary" : "Paid option"}</strong></li>
-                                    <li>• Changes: <strong>{spec.changePolicy === "free" ? "Free" : spec.changePolicy === "reduced" ? "Low Fee" : "Standard Fee"}</strong></li>
-                                    <li>• Refund: <strong>{spec.refundPolicy === "free" ? "Full Refund" : spec.refundPolicy === "fee" ? "With Fee" : "Non-refundable"}</strong></li>
-                                    {spec.loungeIncluded && <li>• <strong>Majan Lounge & Fast Track included</strong></li>}
-                                  </ul>
-                                </div>
-
-                                <div className="mt-5 border-t border-border pt-3">
-                                  <div className="flex items-baseline gap-2">
-                                    <p className="font-display text-2xl font-extrabold text-primary">
-                                      {formatMoney(discountedOMR, currency)}
-                                    </p>
-                                    {promoEntry && (
-                                      <span className="text-xs line-through text-muted-foreground">
-                                        {formatMoney(rawPriceOMR, currency)}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-xs font-medium text-muted-foreground">
-                                    per guest · +{miles.toLocaleString()} Sindbad miles
-                                  </p>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        <div className="mt-6 flex justify-end">
-                          <Button size="lg" className="gap-2 rounded-xl px-7 font-display font-bold" onClick={() => setStep(2)}>
-                            Continue to Seats & Bundles
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
+            <FlightResultsStep
+              search={search}
+              routeId={routeMatch.route.id}
+              currency={currency}
+              lang={lang}
+              thirtyDayFares={thirtyDayFares}
+              activeDayFare={activeDayFare}
+              bffSearchData={bffSearchData}
+              outboundOptions={outboundOptions}
+              secondSegmentOptions={secondSegmentOptions}
+              selectedOutbound={selectedOutbound}
+              selectedSecondSeg={selectedSecondSeg}
+              selectedBrand={selectedBrand}
+              visibleBrands={visibleBrands}
+              nonStopOnly={nonStopOnly}
+              sortBy={sortBy}
+              nearbyAltCodes={nearbyAltCodes}
+              computeBrandPricePerPaxOMR={computeBrandPricePerPaxOMR}
+              onUpdateSearch={(patch) => setSearch({ ...search, ...patch })}
+              onSelectOutbound={setSelectedOutboundId}
+              onSelectSecondSeg={setSelectedReturnId}
+              onSelectBrand={setSelectedBrand}
+              onToggleNonStopOnly={setNonStopOnly}
+              onChangeSortBy={setSortBy}
+              onContinue={() => setStep(2)}
+            />
           )}
 
           {step === 2 && selectedOutbound && (
             <div className="space-y-6">
-              <SeatMapSelector
-                aircraft={selectedOutbound.aircraft}
-                fareBrand={selectedBrand}
-                selectedBundleIds={selectedBundleIds}
-                selectedSeats={selectedSeats.map((s) => s.id)}
-                maxSeats={totalPax}
-                onToggleSeat={handleToggleSeat}
-              />
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Segment 1 Seat Map ({selectedOutbound.origin} → {selectedOutbound.destination})
+                </p>
+                <SeatMapSelector
+                  aircraft={selectedOutbound.aircraft}
+                  fareBrand={selectedBrand}
+                  selectedBundleIds={selectedBundleIds}
+                  selectedSeats={selectedSeats.map((s) => s.id)}
+                  maxSeats={totalPax}
+                  onToggleSeat={(seat) => toggleSeatIn(setSelectedSeats, seat)}
+                />
+              </div>
+
+              {selectedSecondSeg && (
+                <div>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Segment 2 Seat Map ({selectedSecondSeg.origin} → {selectedSecondSeg.destination}
+                    )
+                  </p>
+                  <SeatMapSelector
+                    aircraft={selectedSecondSeg.aircraft}
+                    fareBrand={selectedBrand}
+                    selectedBundleIds={selectedBundleIds}
+                    selectedSeats={selectedReturnSeats.map((s) => s.id)}
+                    maxSeats={totalPax}
+                    onToggleSeat={(seat) => toggleSeatIn(setSelectedReturnSeats, seat)}
+                  />
+                </div>
+              )}
+
               <AncillariesPanel
                 fareBrand={selectedBrand}
                 isLongHaul={routeMatch.route.isLongHaul}
@@ -1045,14 +854,20 @@ function Index() {
                 selectedSsrIds={selectedSsrIds}
                 insuranceChoice={insuranceChoice}
                 onToggleBundle={(id) =>
-                  setSelectedBundleIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+                  setSelectedBundleIds((prev) =>
+                    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                  )
                 }
                 onToggleAncillary={(id) =>
-                  setSelectedAncillaryIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+                  setSelectedAncillaryIds((prev) =>
+                    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                  )
                 }
                 onSelectMeal={setSelectedMealId}
                 onToggleSsr={(id) =>
-                  setSelectedSsrIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+                  setSelectedSsrIds((prev) =>
+                    prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                  )
                 }
                 onInsuranceChoice={setInsuranceChoice}
               />
@@ -1060,7 +875,11 @@ function Index() {
                 <Button variant="outline" onClick={() => setStep(1)} className="gap-1.5">
                   <ChevronLeft className="h-4 w-4" /> Back to Fares
                 </Button>
-                <Button size="lg" onClick={handleProceedFromAncillaries} className="gap-2 rounded-xl font-display font-bold">
+                <Button
+                  size="lg"
+                  onClick={handleProceedFromAncillaries}
+                  className="gap-2 rounded-xl font-display font-bold"
+                >
                   Continue to Passengers ({formatMoney(totalOMR, currency)})
                   <ChevronRight className="h-4 w-4" />
                 </Button>
@@ -1081,7 +900,11 @@ function Index() {
                 <Button variant="outline" onClick={() => setStep(2)} className="gap-1.5">
                   <ChevronLeft className="h-4 w-4" /> Back to Seats & Bundles
                 </Button>
-                <Button size="lg" onClick={handleProceedFromPassengers} className="gap-2 rounded-xl font-display font-bold">
+                <Button
+                  size="lg"
+                  onClick={handleProceedFromPassengers}
+                  className="gap-2 rounded-xl font-display font-bold"
+                >
                   Review & Pay ({formatMoney(totalOMR, currency)})
                   <ChevronRight className="h-4 w-4" />
                 </Button>
@@ -1093,7 +916,9 @@ function Index() {
             <div className="space-y-4">
               <PaymentCheckoutStep
                 baseFareOMR={baseFareOMR}
+                awardMilesRequired={awardMilesRequired}
                 taxesOMR={taxesOMR}
+                taxBreakdown={taxBreakdown}
                 ancillariesOMR={ancillariesOMR}
                 promoDiscountOMR={promoDiscountOMR}
                 totalOMR={totalOMR}
@@ -1111,7 +936,10 @@ function Index() {
                           {
                             label: `${selectedSecondSeg.origin} → ${selectedSecondSeg.destination}`,
                             flightNumber: selectedSecondSeg.flightNumber,
-                            dateISO: search.tripType === "roundtrip" ? search.returnDate : search.multiLeg2Date,
+                            dateISO:
+                              search.tripType === "roundtrip"
+                                ? search.returnDate
+                                : search.multiLeg2Date,
                             times: `${selectedSecondSeg.departureTime} – ${selectedSecondSeg.arrivalTime}`,
                           },
                         ]
@@ -1120,12 +948,18 @@ function Index() {
                   passengers: paxForms.map((p, idx) => ({
                     name: `${p.firstName} ${p.lastName}`,
                     role: p.role,
-                    seat: selectedSeats[idx]?.id ?? `${15 + idx}A`,
+                    seat: `${selectedSeats[idx]?.id ?? `${15 + idx}A`}${
+                      selectedReturnSeats[idx]?.id ? ` / ${selectedReturnSeats[idx]!.id}` : ""
+                    }`,
                   })),
                   fareBrandName: FARE_BRANDS[selectedBrand].name,
                   ancillaryNames: [
-                    ...selectedBundleIds.map((id) => VIRTUAL_BUNDLES.find((b) => b.id === id)?.name ?? id),
-                    ...selectedAncillaryIds.map((id) => DIRECT_ANCILLARIES.find((a) => a.id === id)?.name ?? id),
+                    ...selectedBundleIds.map(
+                      (id) => VIRTUAL_BUNDLES.find((b) => b.id === id)?.name ?? id,
+                    ),
+                    ...selectedAncillaryIds.map(
+                      (id) => DIRECT_ANCILLARIES.find((a) => a.id === id)?.name ?? id,
+                    ),
                     ...(insuranceChoice === "yes" ? ["Travel Protection Insurance"] : []),
                   ],
                 }}
@@ -1138,169 +972,23 @@ function Index() {
           )}
 
           {step === 5 && confirmedRloc && (
-            <div className="mx-auto max-w-2xl rounded-2xl border-2 border-success/40 bg-card p-8 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-success/15 text-success">
-                <Ticket className="h-7 w-7" />
-              </div>
-              <h2 className="mt-4 font-display text-3xl font-extrabold">
-                {confirmedMode === "hold" ? "Fare Held" : "Booking Confirmed!"}
-              </h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Your Oman Air Record Locator (RLOC) is synced across Manage My Booking & Check-in.
-              </p>
-              <div className="mx-auto mt-5 inline-block rounded-2xl border border-gold bg-gold/15 px-8 py-4">
-                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Booking Reference</p>
-                <p className="font-display text-4xl font-extrabold tracking-[0.2em] text-primary">{confirmedRloc}</p>
-              </div>
-              <div className="mt-6 flex flex-wrap justify-center gap-3">
-                <Button asChild size="lg" className="rounded-xl font-display font-bold">
-                  <Link to="/manage">Add Extras or Manage Booking</Link>
-                </Button>
-                <Button asChild variant="secondary" size="lg" className="rounded-xl font-display font-bold">
-                  <Link to="/checkin">Go to Online Check-in</Link>
-                </Button>
-                <Button variant="outline" size="lg" className="rounded-xl" onClick={() => setStep(0)}>
-                  Book Another Flight
-                </Button>
-              </div>
-            </div>
+            <BookingConfirmationStep
+              confirmedRloc={confirmedRloc}
+              confirmedMode={confirmedMode}
+              onBookAnother={() => setStep(0)}
+            />
           )}
         </section>
       )}
 
       {step === 0 && (
-        <>
-          <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <h2 className="font-display text-2xl font-extrabold sm:text-3xl">
-                  {lang === "ar" ? "استكشف 20 وجهة للطيران العماني" : "Explore All 20 Oman Air Routes"}
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Synthetic 30-day Economy Super Saver fares from Muscat (MCT) — click any route to launch instant booking.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {["All", "Oman", "GCC & MENA", "Europe", "Asia", "Africa"].map((reg) => (
-                  <button
-                    key={reg}
-                    type="button"
-                    onClick={() => setRegionFilter(reg)}
-                    className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-                      regionFilter === reg
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {reg}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {filtered20Routes.map((route) => {
-                const dest = AIRPORTS.find((a) => a.code === route.destination);
-                const lowest30 = Math.min(...get30DayFareRepository(route.id).map((d) => d.pricesOMR.ECO_SAVER));
-                return (
-                  <button
-                    key={route.id}
-                    type="button"
-                    onClick={() =>
-                      handleRunSearch({
-                        tripType: "roundtrip",
-                        origin: route.origin,
-                        destination: route.destination,
-                        departDate: getDateISO(2),
-                        returnDate: getDateISO(8),
-                        multiLeg2Origin: route.destination,
-                        multiLeg2Destination: "DXB",
-                        multiLeg2Date: getDateISO(6),
-                        cabin: "economy",
-                        passengers: { adults: 1, children: 0, infants: 0, students: 0, seniors: 0, labor: 0 },
-                        promoCode: "",
-                      })
-                    }
-                    className="group flex flex-col justify-between rounded-2xl border border-border bg-card p-4 text-start transition-all hover:-translate-y-0.5 hover:border-primary hover:shadow-md"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-bold text-secondary-foreground">
-                          {route.highlightTag}
-                        </span>
-                        <span className="text-xs font-semibold text-muted-foreground">{route.flightNumber}</span>
-                      </div>
-                      <h3 className="mt-3 font-display text-lg font-bold group-hover:text-primary">
-                        {lang === "ar" ? dest?.cityAr : dest?.city}{" "}
-                        <span className="text-xs font-semibold text-muted-foreground">({route.destination})</span>
-                      </h3>
-                      <p className="mt-1 text-xs text-muted-foreground">{route.highlightNote}</p>
-                    </div>
-                    <div className="mt-4 flex items-end justify-between border-t border-border pt-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-wider text-muted-foreground">30-Day Low</p>
-                        <p className="font-display text-base font-extrabold text-primary">
-                          {formatMoney(lowest30, currency)}
-                        </p>
-                      </div>
-                      <span className="inline-flex items-center gap-1 text-xs font-bold text-primary">
-                        Book <ArrowRight className="h-3.5 w-3.5" />
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="border-t border-border bg-teal-deep text-teal-deep-foreground">
-            <div className="mx-auto grid max-w-7xl items-center gap-8 px-4 py-14 sm:px-6 lg:grid-cols-2">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-gold">Oman Air Business Studio</p>
-                <h2 className="mt-2 font-display text-3xl font-extrabold sm:text-4xl">
-                  Your Private Suite Above the Arabian Sea
-                </h2>
-                <p className="mt-3 text-sm opacity-85">
-                  Available on Boeing 787-9 Dreamliner flagship routes to London, Paris, Frankfurt, Amsterdam, Bangkok, and Kuala Lumpur. Enjoy 60 kg baggage, enclosed privacy walls, Majan Lounge access, and Omani hospitality.
-                </p>
-                <div className="mt-6 flex flex-wrap gap-3">
-                  <Button
-                    variant="secondary"
-                    size="lg"
-                    className="rounded-xl font-display font-bold"
-                    onClick={() =>
-                      handleRunSearch({
-                        tripType: "roundtrip",
-                        origin: "MCT",
-                        destination: "LHR",
-                        departDate: getDateISO(3),
-                        returnDate: getDateISO(10),
-                        multiLeg2Origin: "LHR",
-                        multiLeg2Destination: "MCT",
-                        multiLeg2Date: getDateISO(8),
-                        cabin: "studio",
-                        passengers: { adults: 1, children: 0, infants: 0, students: 0, seniors: 0, labor: 0 },
-                        promoCode: "",
-                      })
-                    }
-                  >
-                    Search Business Studio to London
-                  </Button>
-                </div>
-              </div>
-              <div className="overflow-hidden rounded-2xl border border-gold/30">
-                <img
-                  src={studioImg}
-                  alt="Oman Air Business Studio private suite interior"
-                  loading="lazy"
-                  width={1280}
-                  height={768}
-                  className="h-full w-full object-cover"
-                />
-              </div>
-            </div>
-          </section>
-        </>
+        <ExploreRoutesSection
+          lang={lang}
+          currency={currency}
+          regionFilter={regionFilter}
+          onChangeRegion={setRegionFilter}
+          onLaunchSearch={handleRunSearch}
+        />
       )}
     </div>
   );

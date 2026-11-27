@@ -95,7 +95,7 @@
   --secondary: oklch(0.945 0.016 202);
   --secondary-foreground: oklch(0.26 0.055 208);
   --muted: oklch(0.955 0.008 85);
-  --muted-foreground: oklch(0.46 0.025 215);
+  --muted-foreground: oklch(0.35 0.032 215);
   --accent: oklch(0.74 0.125 78);
   --accent-foreground: oklch(0.18 0.03 215);
   --gold: oklch(0.74 0.125 78);
@@ -173,7 +173,11 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  h1, h2, h3, h4, .font-display {
+  h1,
+  h2,
+  h3,
+  h4,
+  .font-display {
     font-family: var(--font-display);
   }
 }

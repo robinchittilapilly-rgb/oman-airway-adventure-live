@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as CheckinRouteImport } from './routes/checkin'
 import { Route as ManageRouteImport } from './routes/manage'
 import { Route as SindbadRouteImport } from './routes/sindbad'
@@ -18,6 +19,11 @@ import { Route as StatusRouteImport } from './routes/status'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CheckinRoute = CheckinRouteImport.update({
@@ -43,6 +49,7 @@ const StatusRoute = StatusRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/checkin': typeof CheckinRoute
   '/manage': typeof ManageRoute
   '/sindbad': typeof SindbadRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/checkin': typeof CheckinRoute
   '/manage': typeof ManageRoute
   '/sindbad': typeof SindbadRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/checkin': typeof CheckinRoute
   '/manage': typeof ManageRoute
   '/sindbad': typeof SindbadRoute
@@ -65,14 +74,22 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/checkin' | '/manage' | '/sindbad' | '/status'
+  fullPaths: '/' | '/admin' | '/checkin' | '/manage' | '/sindbad' | '/status'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/checkin' | '/manage' | '/sindbad' | '/status'
-  id: '__root__' | '/' | '/checkin' | '/manage' | '/sindbad' | '/status'
+  to: '/' | '/admin' | '/checkin' | '/manage' | '/sindbad' | '/status'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/checkin'
+    | '/manage'
+    | '/sindbad'
+    | '/status'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
   CheckinRoute: typeof CheckinRoute
   ManageRoute: typeof ManageRoute
   SindbadRoute: typeof SindbadRoute
@@ -86,6 +103,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/checkin': {
@@ -121,6 +145,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
   CheckinRoute: CheckinRoute,
   ManageRoute: ManageRoute,
   SindbadRoute: SindbadRoute,
