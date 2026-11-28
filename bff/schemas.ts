@@ -80,6 +80,7 @@ export const checkoutSchema = z.object({
   holdHours: z.union([z.literal(24), z.literal(48)]).optional(),
   paymentMethod: paymentMethodEnum,
   paymentDetailLabel: z.string().trim().min(1).max(120),
+  paymentToken: z.string().trim().min(4).max(80).optional(),
   useMilesSplit: z.boolean().optional(),
   useTravelBank: z.boolean().optional(),
 });
@@ -87,6 +88,7 @@ export const checkoutSchema = z.object({
 export const settleHoldSchema = z.object({
   paymentMethod: paymentMethodEnum.default("card"),
   paymentDetailLabel: z.string().trim().min(1).max(120).default("Visa Infinite •••• 4821"),
+  paymentToken: z.string().trim().min(4).max(80).optional(),
   useMilesSplit: z.boolean().optional(),
   useTravelBank: z.boolean().optional(),
 });
@@ -212,8 +214,52 @@ export const cmsAdminUpdateSchema = z.object({
       active: z.boolean(),
     })
     .optional(),
+  upsertArticle: z
+    .object({
+      slug: z.string().trim().min(2).max(80),
+      category: z
+        .enum(["policy", "baggage", "advisory", "destination", "sindbad"])
+        .default("advisory"),
+      titleEn: z.string().trim().min(2).max(160),
+      titleAr: z.string().trim().min(2).max(160),
+      bodyEn: z.string().trim().min(2).max(2000),
+      bodyAr: z.string().trim().min(2).max(2000),
+      routeLink: z.string().trim().min(1).max(80).default("/"),
+      published: z.boolean().default(true),
+    })
+    .optional(),
 });
 
 export const aiChatSchema = z.object({
   message: z.string().trim().min(1).max(600),
+});
+
+export const mfaVerifySchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "6-digit TOTP authenticator code required"),
+});
+
+export const tokenizeCardSchema = z.object({
+  cardLast4: z
+    .string()
+    .trim()
+    .regex(/^\d{4}$/),
+  expiry: z
+    .string()
+    .trim()
+    .regex(/^\d{2}\/\d{2}$/),
+  cardholderName: z.string().trim().min(2).max(80),
+  scheme: z.enum(["Visa", "Mastercard", "AMEX", "Diners", "JCB"]),
+  amountOMR: z.number().min(0).max(50000),
+});
+
+export const threeDsChallengeSchema = z.object({
+  paymentToken: z.string().trim().min(4).max(80),
+});
+
+export const threeDsVerifySchema = z.object({
+  threeDsTransId: z.string().trim().min(4).max(80),
+  otpCode: z.string().trim().min(4).max(12),
 });

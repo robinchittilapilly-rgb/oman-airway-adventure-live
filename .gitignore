@@ -12,6 +12,8 @@ dist
 dist-bff
 dist-ssr
 .bff-data
+playwright-report
+test-results
 .output
 .vinxi
 .tanstack/**

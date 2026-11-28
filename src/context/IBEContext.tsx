@@ -109,38 +109,19 @@ export function IBEProvider({ children }: { children: ReactNode }) {
   const [prefs, setPrefs] = useState<IBEPersistedPrefs>(DEFAULT_PREFS);
   const [hydrated, setHydrated] = useState(false);
 
-  const bffUrl = getConfiguredBffUrl();
+  const [bffUrl, setBffUrl] = useState<string | null>(null);
   const [bffConnected, setBffConnected] = useState(false);
   const [demoModeEnabled, setDemoModeEnabled] = useState(true);
-  const [role, setRole] = useState<"guest" | "member" | "admin">(bffUrl ? "guest" : "member");
+  const [role, setRole] = useState<"guest" | "member" | "admin">("guest");
   const [cmsState, setCmsState] = useState<BffCmsState | null>(null);
-  const [sindbadSignedIn, setSindbadSignedIn] = useState(!bffUrl);
+  const [sindbadSignedIn, setSindbadSignedIn] = useState(false);
   const [sindbadMemberName, setSindbadMemberName] = useState("Tariq Al-Balushi");
-  const [sindbadTier, setSindbadTierState] = useState<SindbadTier>(bffUrl ? "Blue" : "Gold");
-  const [sindbadMiles, setSindbadMiles] = useState(bffUrl ? 0 : 68450);
-  const [tierPoints, setTierPoints] = useState(bffUrl ? 0 : 420);
-  const [travelBankOMR, setTravelBankOMR] = useState(bffUrl ? 0 : 65);
-  const [bookings, setBookings] = useState<SavedBookingPNR[]>(bffUrl ? [] : INITIAL_SAMPLE_PNRS);
-  const [household, setHousehold] = useState<HouseholdMember[]>(
-    bffUrl
-      ? []
-      : [
-          {
-            id: "hh-1",
-            name: "Reem Al-Balushi",
-            relation: "Spouse",
-            sindbadNo: "SB-8841210",
-            contributedMiles: 14200,
-          },
-          {
-            id: "hh-2",
-            name: "Yusuf Al-Balushi",
-            relation: "Child",
-            sindbadNo: "SB-9100342",
-            contributedMiles: 4850,
-          },
-        ],
-  );
+  const [sindbadTier, setSindbadTierState] = useState<SindbadTier>("Blue");
+  const [sindbadMiles, setSindbadMiles] = useState(0);
+  const [tierPoints, setTierPoints] = useState(0);
+  const [travelBankOMR, setTravelBankOMR] = useState(0);
+  const [bookings, setBookings] = useState<SavedBookingPNR[]>([]);
+  const [household, setHousehold] = useState<HouseholdMember[]>([]);
   const [claimedPnrs, setClaimedPnrs] = useState<string[]>([]);
 
   const syncFromBffUser = (user: BffSessionUser) => {
@@ -180,17 +161,55 @@ export function IBEProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    const detectedBffUrl = getConfiguredBffUrl();
+    setBffUrl(detectedBffUrl);
+    if (!detectedBffUrl) {
+      setRole("member");
+      setSindbadSignedIn(true);
+      setSindbadTierState("Gold");
+      setSindbadMiles(68450);
+      setTierPoints(420);
+      setTravelBankOMR(65);
+      setBookings(INITIAL_SAMPLE_PNRS);
+      setHousehold([
+        {
+          id: "hh-1",
+          name: "Reem Al-Balushi",
+          relation: "Spouse",
+          sindbadNo: "SB-8841210",
+          contributedMiles: 14200,
+        },
+        {
+          id: "hh-2",
+          name: "Yusuf Al-Balushi",
+          relation: "Child",
+          sindbadNo: "SB-9100342",
+          contributedMiles: 4850,
+        },
+      ]);
+    }
     try {
       const raw = window.localStorage.getItem(PREFS_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<IBEPersistedPrefs>;
         setPrefs((prev) => ({ ...prev, ...parsed }));
-      } else if (
-        typeof navigator !== "undefined" &&
-        navigator.language.toLowerCase().startsWith("ar")
-      ) {
-        // FR-30: browser-language detection on first visit
-        setPrefs((prev) => ({ ...prev, lang: "ar" }));
+      } else {
+        if (typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("ar")) {
+          // FR-30: browser-language detection on first visit
+          setPrefs((prev) => ({ ...prev, lang: "ar" }));
+        }
+        if (detectedBffUrl) {
+          void bffClient
+            .getEdgeContext()
+            .then((edge) => {
+              setPrefs((prev) => ({
+                ...prev,
+                currency: edge.currency,
+                lang: edge.lang,
+              }));
+            })
+            .catch(() => undefined);
+        }
       }
     } catch {
       // ignore storage errors

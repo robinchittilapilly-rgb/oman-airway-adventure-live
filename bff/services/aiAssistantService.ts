@@ -1,8 +1,11 @@
-import { AIRPORTS, OMAN_AIR_20_ROUTES, findRouteForPair } from "../../src/data/omanAirRoutes";
-import { PROMO_CODES, calculateSindbadMiles } from "../../src/lib/ibe-rules";
+import { AIRPORTS, findRouteForPair, get30DayFareRepository } from "../../src/data/omanAirRoutes";
+import { computeExchangeQuote } from "../../src/lib/ibe-rules";
 import type { PssAdapter } from "../adapters/pssAdapter";
-import type { BffSessionRecord } from "../stores/sessionStore";
+import { canSessionAccessBooking } from "../middleware/authSession";
+import { BffAppError } from "../middleware/errorTranslator";
+import type { BffSessionRecord, SessionAndCartStore } from "../stores/sessionStore";
 import type { AppLang, BffAiChatResponse } from "../types";
+import { recordAudit } from "./auditService";
 import type { BffCmsService } from "./cmsService";
 
 interface ToolTrace {
@@ -10,128 +13,314 @@ interface ToolTrace {
   summary: string;
 }
 
+const INJECTION_PATTERNS: RegExp[] = [
+  /ignore\s+(all\s+)?(previous|prior|above)\s+instructions?/i,
+  /reveal\s+(your\s+)?(system\s+prompt|secrets?|env|token)/i,
+  /internalPssToken|BFF_SESSION_SECRET|GEMINI_API_KEY/i,
+  /act\s+as\s+(root|admin|system)|override\s+role/i,
+  /<\s*script\b|javascript:/i,
+];
+
+export function detectPromptInjection(raw: string): string | null {
+  for (const pat of INJECTION_PATTERNS) {
+    if (pat.test(raw)) return pat.source;
+  }
+  return null;
+}
+
+const GEMINI_FUNCTION_DECLARATIONS = [
+  {
+    name: "searchFlights",
+    description:
+      "Search Oman Air flights and 30-day lowest OMR fares for an origin and destination IATA code.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        origin: { type: "STRING", description: "3-letter IATA origin code, e.g. MCT" },
+        destination: {
+          type: "STRING",
+          description: "3-letter IATA destination code, e.g. LHR, DXB, BKK",
+        },
+      },
+      required: ["origin", "destination"],
+    },
+  },
+  {
+    name: "quoteExchange",
+    description:
+      "Compute a date-exchange fee and fare difference quote for an authorized PNR RLOC.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        rloc: {
+          type: "STRING",
+          description: "6-character Oman Air booking reference (e.g. WY7K9M)",
+        },
+        newDate: { type: "STRING", description: "Requested new departure date YYYY-MM-DD" },
+      },
+      required: ["rloc", "newDate"],
+    },
+  },
+  {
+    name: "checkIrrops",
+    description:
+      "Check disruption status and fee-waived IRROPS options for an authorized PNR RLOC.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        rloc: {
+          type: "STRING",
+          description: "6-character Oman Air booking reference (e.g. WY4D2X)",
+        },
+      },
+      required: ["rloc"],
+    },
+  },
+  {
+    name: "checkStatus",
+    description:
+      "Check live schedule, terminal, gate, and disruption status across the 20 Oman Air routes.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        flightQuery: {
+          type: "STRING",
+          description: "Flight number (e.g. WY 603) or city/airport code",
+        },
+      },
+      required: ["flightQuery"],
+    },
+  },
+];
+
 /**
  * GenAI Suhail Conversational AI Service (FR-7, L1/L2 GenAI / LLM provider).
- * Executes bounded server-side domain tools (searchFlights, flightStatus, promoLookup, loyaltyTier)
- * and calls Gemini (`GEMINI_API_KEY`) when configured, with deterministic tool-backed synthesis fallback.
+ * Executes structured Gemini function-calling tools strictly scoped to authenticated/authorized
+ * session context, protected by prompt-injection guardrails and audit logging.
  */
 export class SuhailAiService {
   constructor(
     private readonly pss: PssAdapter,
     private readonly cms: BffCmsService,
+    private readonly store: SessionAndCartStore,
   ) {}
 
-  private async runDomainTools(message: string, session: BffSessionRecord) {
-    const lower = message.toLowerCase();
-    const traces: ToolTrace[] = [];
-    const contextFacts: string[] = [];
-    let suggestedAction: BffAiChatResponse["suggestedAction"];
-
-    const cmsState = await this.cms.getState();
-
-    if (cmsState.darkSiteActive) {
-      traces.push({ name: "get_cms_advisory", summary: "Dark Site travel advisory active" });
-      contextFacts.push(`Active Travel Advisory: ${cmsState.darkSiteAdvisoryEn}`);
-    }
-
-    if (
-      lower.includes("promo") ||
-      lower.includes("discount") ||
-      lower.includes("كود") ||
-      lower.includes("خصم")
-    ) {
-      const activePromos = Object.entries(cmsState.dynamicPromos)
-        .filter(([, p]) => p.active)
-        .map(([code, p]) => `${code} (${p.discountPct}% - ${p.label})`);
-      traces.push({ name: "get_active_promos", summary: `${activePromos.length} CMS promo codes` });
-      contextFacts.push(`Active promo codes: ${activePromos.join("; ")}`);
-    }
-
-    if (
-      lower.includes("wy4d2x") ||
-      lower.includes("cancel") ||
-      lower.includes("disrupt") ||
-      lower.includes("rebook") ||
-      lower.includes("اضطراب")
-    ) {
-      traces.push({ name: "check_irrops_policy", summary: "Retrieved zero-fee IRROPS options" });
-      contextFacts.push(
-        "IRROPS self-service allows zero-fee rebooking onto alternative departures (e.g. WY 607 / WY 611) or instant Travel Bank credit (+OMR 25 care bonus) in Manage My Booking.",
+  private async executeStructuredTool(
+    name: string,
+    args: Record<string, unknown>,
+    session: BffSessionRecord,
+  ): Promise<{
+    result: Record<string, unknown>;
+    trace: ToolTrace;
+    suggestedRoute?: "/" | "/manage" | "/checkin" | "/status" | "/sindbad";
+  }> {
+    if (name === "searchFlights") {
+      const origin = String(args["origin"] ?? "MCT")
+        .trim()
+        .toUpperCase()
+        .slice(0, 3);
+      const destRaw = String(args["destination"] ?? "LHR")
+        .trim()
+        .toUpperCase();
+      const airport = AIRPORTS.find(
+        (a) => a.code === destRaw || a.city.toUpperCase().includes(destRaw),
       );
-      suggestedAction = { label: "Open Manage My Booking", route: "/manage" };
-    }
-
-    if (
-      lower.includes("bag") ||
-      lower.includes("gold") ||
-      lower.includes("sindbad") ||
-      lower.includes("أميال") ||
-      lower.includes("سندباد")
-    ) {
-      const sampleMiles = calculateSindbadMiles(200, session.user.tier);
-      traces.push({
-        name: "inspect_sindbad_tier",
-        summary: `Tier=${session.user.tier}, signedIn=${session.user.signedIn}`,
-      });
-      contextFacts.push(
-        `Current session tier: Sindbad ${session.user.tier} (${session.user.signedIn ? `${session.user.miles} miles available` : "Guest mode"}). OMR 200 eligible spend earns +${sampleMiles} miles.`,
-      );
-      if (!suggestedAction) suggestedAction = { label: "Open Sindbad Portal", route: "/sindbad" };
-    }
-
-    if (lower.includes("check") || lower.includes("boarding") || lower.includes("صعود")) {
-      traces.push({
-        name: "check_dcs_eligibility",
-        summary: "Checked online check-in & IATA BCBP capability",
-      });
-      contextFacts.push(
-        "Online check-in issues IATA M1 BCBP scannable QR boarding passes and 10-digit Oman Air (0910) bag tags.",
-      );
-      if (!suggestedAction) suggestedAction = { label: "Go to Online Check-In", route: "/checkin" };
-    }
-
-    // Route lookup across all 20 routes / city names
-    const matchedAirport = AIRPORTS.find(
-      (a) =>
-        lower.includes(a.code.toLowerCase()) ||
-        lower.includes(a.city.toLowerCase().split(" ")[0] ?? a.city.toLowerCase()),
-    );
-    const routeMatch =
-      matchedAirport && matchedAirport.code !== "MCT"
-        ? findRouteForPair("MCT", matchedAirport.code)
-        : OMAN_AIR_20_ROUTES.find((r) => lower.includes(r.flightNumber.toLowerCase()));
-
-    if (routeMatch) {
-      const r = "route" in routeMatch ? routeMatch.route : routeMatch;
+      const destination = airport?.code ?? destRaw.slice(0, 3);
       const dateISO = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
-      const searchRes = await this.pss.searchFlights(
-        r.origin,
-        r.destination,
+      const match = findRouteForPair(origin, destination);
+      if (!match) {
+        return {
+          trace: { name: "searchFlights", summary: `${origin}->${destination} not found` },
+          result: {
+            found: false,
+            message: `No direct schedule found for ${origin} -> ${destination}.`,
+          },
+        };
+      }
+      const res = await this.pss.searchFlights(
+        origin,
+        destination,
         dateISO,
         session.internalPssToken,
       );
-      const lowest = Math.min(
-        ...searchRes.calendar.filter((d) => !d.soldOut).map((d) => d.pricesOMR.ECO_SAVER),
-      );
-      traces.push({ name: "pss_search_flights", summary: `${r.id} low=OMR ${lowest}` });
-      contextFacts.push(
-        `Route ${r.origin} -> ${r.destination} (${r.flightNumber}, ${r.aircraft}): 30-day Economy Super Saver from OMR ${lowest}, taxes OMR ${r.taxesOMR}, Studio available=${r.hasStudio}.`,
-      );
-      if (!suggestedAction) suggestedAction = { label: "Search Flights", route: "/" };
+      const openDays = res.calendar.filter((d) => !d.soldOut);
+      const lowest = Math.min(...openDays.map((d) => d.pricesOMR.ECO_SAVER));
+      return {
+        trace: { name: "searchFlights", summary: `${res.routeId} from OMR ${lowest}` },
+        suggestedRoute: "/",
+        result: {
+          found: true,
+          routeId: res.routeId,
+          lowestEcoSaverOMR: lowest,
+          taxesOMR: match.route.taxesOMR,
+          aircraft: res.offers[0]?.aircraft,
+          offersCount: res.offers.length,
+        },
+      };
     }
 
-    if (traces.length === 0) {
-      const defaultPromos = Object.keys(PROMO_CODES).join(", ");
-      traces.push({
-        name: "cms_directory_overview",
-        summary: `20 routes, promos: ${defaultPromos}`,
+    if (name === "quoteExchange") {
+      const rloc = String(args["rloc"] ?? "")
+        .trim()
+        .toUpperCase();
+      const booking = rloc ? await this.store.getBooking(rloc) : null;
+      if (!booking || !canSessionAccessBooking(session, booking)) {
+        return {
+          trace: { name: "quoteExchange", summary: `${rloc || "NONE"} denied (not authorized)` },
+          suggestedRoute: "/manage",
+          result: {
+            authorized: false,
+            error:
+              "Booking access requires signed-in ownership or verification with RLOC + Passenger Last Name in Manage My Booking.",
+          },
+        };
+      }
+      const newDate = String(
+        args["newDate"] ?? new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10),
+      );
+      const cal = get30DayFareRepository(`${booking.origin}-${booking.destination}`);
+      const oldDay = cal.find((d) => d.dateISO === booking.dateISO) ?? cal[0]!;
+      const newDay = cal.find((d) => d.dateISO === newDate) ?? cal[0]!;
+      const q = computeExchangeQuote({
+        fareBrand: booking.fareBrand,
+        oldFareOMR: oldDay.pricesOMR[booking.fareBrand],
+        newFareOMR: newDay.pricesOMR[booking.fareBrand],
       });
-      contextFacts.push(
-        `Oman Air operates 20 curated routes from Muscat (MCT), supports Award Bookings with Sindbad Miles, 24h/48h Hold My Fare, and active promo codes (${defaultPromos}).`,
-      );
+      const paxCount = Math.max(1, booking.passengers.length);
+      return {
+        trace: {
+          name: "quoteExchange",
+          summary: `${rloc} -> ${newDate} total OMR ${q.totalDueOMR * paxCount}`,
+        },
+        suggestedRoute: "/manage",
+        result: {
+          authorized: true,
+          rloc,
+          newDate,
+          totalDueOMR: q.totalDueOMR * paxCount,
+          changeFeeOMR: q.changeFeeOMR * paxCount,
+        },
+      };
     }
 
-    return { traces, contextFacts, suggestedAction };
+    if (name === "checkIrrops") {
+      const rloc = String(args["rloc"] ?? "")
+        .trim()
+        .toUpperCase();
+      const booking = rloc ? await this.store.getBooking(rloc) : null;
+      if (!booking || !canSessionAccessBooking(session, booking)) {
+        return {
+          trace: { name: "checkIrrops", summary: `${rloc || "NONE"} denied (not authorized)` },
+          suggestedRoute: "/manage",
+          result: {
+            authorized: false,
+            error:
+              "Please retrieve the booking using RLOC and Passenger Last Name first to inspect IRROPS options.",
+          },
+        };
+      }
+      return {
+        trace: { name: "checkIrrops", summary: `${rloc} status=${booking.status}` },
+        suggestedRoute: booking.status === "DISRUPTED_CXL" ? "/manage" : "/checkin",
+        result: {
+          authorized: true,
+          rloc: booking.rloc,
+          status: booking.status,
+          flightNumber: booking.flightNumber,
+          disruptionNote: booking.disruptionNote ?? "Operating normally.",
+          freeRebookOptions:
+            booking.status === "DISRUPTED_CXL"
+              ? ["WY 607 (14:15)", "WY 611 (19:40)", "Travel Bank +25 OMR"]
+              : [],
+        },
+      };
+    }
+
+    // checkStatus
+    const q = String(args["flightQuery"] ?? "")
+      .trim()
+      .toUpperCase();
+    const routes = await this.pss.getFlightTimetable();
+    const matches = routes
+      .map((r, idx) => ({
+        flightNumber: r.flightNumber,
+        route: `${r.origin}->${r.destination}`,
+        departureTime: r.departureTime,
+        gate: `T1 · A${10 + (idx % 12)}`,
+        status:
+          r.flightNumber === "WY 603"
+            ? "DISRUPTED (IRROPS)"
+            : idx % 5 === 1
+              ? "BOARDING"
+              : "ON TIME",
+      }))
+      .filter((r) => !q || r.flightNumber.toUpperCase().includes(q) || r.route.includes(q))
+      .slice(0, 3);
+    return {
+      trace: { name: "checkStatus", summary: `${matches.length} flight(s) matched` },
+      suggestedRoute: "/status",
+      result: { flights: matches },
+    };
+  }
+
+  private inferFallbackTools(message: string): { name: string; args: Record<string, unknown> }[] {
+    const lower = message.toLowerCase();
+    const rlocMatch = message.toUpperCase().match(/\b(WY[A-Z0-9]{4})\b/);
+    const calls: { name: string; args: Record<string, unknown> }[] = [];
+
+    if (
+      rlocMatch &&
+      (lower.includes("exchange") || lower.includes("change") || lower.includes("date"))
+    ) {
+      calls.push({
+        name: "quoteExchange",
+        args: {
+          rloc: rlocMatch[1],
+          newDate: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10),
+        },
+      });
+    }
+    if (
+      rlocMatch ||
+      lower.includes("irrop") ||
+      lower.includes("cancel") ||
+      lower.includes("disrupt") ||
+      lower.includes("rebook")
+    ) {
+      calls.push({ name: "checkIrrops", args: { rloc: rlocMatch?.[1] ?? "WY4D2X" } });
+    }
+    if (
+      lower.includes("status") ||
+      lower.includes("gate") ||
+      lower.includes("wy 603") ||
+      lower.includes("wy101")
+    ) {
+      const flt = message.toUpperCase().match(/\bWY\s*\d{3}\b/)?.[0] ?? "WY 603";
+      calls.push({ name: "checkStatus", args: { flightQuery: flt } });
+    }
+
+    const matchedAirport = AIRPORTS.find(
+      (a) =>
+        a.code !== "MCT" &&
+        (lower.includes(a.code.toLowerCase()) ||
+          lower.includes((a.city.split(" ")[0] ?? a.city).toLowerCase())),
+    );
+    if (
+      matchedAirport ||
+      lower.includes("fare") ||
+      lower.includes("flight") ||
+      lower.includes("book")
+    ) {
+      calls.push({
+        name: "searchFlights",
+        args: { origin: "MCT", destination: matchedAirport?.code ?? "LHR" },
+      });
+    }
+
+    if (calls.length === 0) {
+      calls.push({ name: "checkStatus", args: { flightQuery: "WY 101" } });
+    }
+    return calls;
   }
 
   async chat(params: {
@@ -139,62 +328,140 @@ export class SuhailAiService {
     lang: AppLang;
     session: BffSessionRecord;
   }): Promise<BffAiChatResponse> {
-    const { traces, contextFacts, suggestedAction } = await this.runDomainTools(
-      params.message,
-      params.session,
-    );
+    const cleanMsg = params.message.replace(/[\r\n\t]+/g, " ").trim();
+    const injection = detectPromptInjection(cleanMsg);
+    if (injection) {
+      await recordAudit(this.store, {
+        eventType: "AI_GUARDRAIL_TRIGGERED",
+        actorSessionId: params.session.sessionId,
+        actorMemberId: params.session.user.memberId,
+        payload: { matchedRule: injection },
+      });
+      throw new BffAppError(
+        "ERR_FORBIDDEN",
+        403,
+        params.lang === "ar"
+          ? "تم حظر هذا الطلب بواسطة ضوابط الأمان الخاصة بمساعد سهيل."
+          : "Request blocked by Suhail AI prompt-injection and session security guardrails.",
+      );
+    }
+
+    const cmsState = await this.cms.getState();
     const apiKey = process.env["GEMINI_API_KEY"]?.trim();
+    const traces: ToolTrace[] = [];
+    let suggestedRoute: "/" | "/manage" | "/checkin" | "/status" | "/sindbad" | undefined;
 
     if (apiKey) {
       try {
         const model = process.env["GEMINI_MODEL"]?.trim() || "gemini-2.5-flash";
-        const systemPrompt =
-          `You are Suhail AI, Oman Air's official concierge inside the IBE Experience API. Respond concisely in ${
-            params.lang === "ar" ? "Arabic" : "English"
-          }. ONLY state factual fares, routes, promo codes, and rules grounded in these verified BFF tool outputs:\n` +
-          contextFacts.map((f) => `- ${f}`).join("\n");
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const systemInstruction = {
+          parts: [
+            {
+              text: `You are Suhail AI, Oman Air's IBE concierge. Respond in ${params.lang === "ar" ? "Arabic" : "English"}. Always use the provided tools for fares, statuses, IRROPS, or booking quotes. Never fabricate booking data. Current authenticated user signedIn=${params.session.user.signedIn}, tier=${params.session.user.tier}.`,
+            },
+          ],
+        };
 
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-          {
+        const contents: Record<string, unknown>[] = [{ role: "user", parts: [{ text: cleanMsg }] }];
+        for (let turn = 0; turn < 3; turn++) {
+          const res = await fetch(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              systemInstruction: { parts: [{ text: systemPrompt }] },
-              contents: [{ role: "user", parts: [{ text: params.message }] }],
-              generationConfig: { temperature: 0.3, maxOutputTokens: 320 },
+              systemInstruction,
+              tools: [{ functionDeclarations: GEMINI_FUNCTION_DECLARATIONS }],
+              contents,
+              generationConfig: { temperature: 0.2, maxOutputTokens: 350 },
             }),
-          },
-        );
-
-        if (res.ok) {
+          });
+          if (!res.ok) break;
           const json = (await res.json()) as {
-            candidates?: { content?: { parts?: { text?: string }[] } }[];
+            candidates?: {
+              content?: {
+                parts?: {
+                  text?: string;
+                  functionCall?: { name: string; args?: Record<string, unknown> };
+                }[];
+              };
+            }[];
           };
-          const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-          if (text) {
-            return {
-              reply: text,
-              provider: "gemini",
-              toolCallsExecuted: traces,
-              suggestedAction,
-            };
+          const parts = json.candidates?.[0]?.content?.parts ?? [];
+          const fnCalls = parts.filter((p) => p.functionCall);
+          if (fnCalls.length === 0) {
+            const replyText = parts
+              .map((p) => p.text ?? "")
+              .join("")
+              .trim();
+            if (replyText) {
+              return {
+                reply: replyText,
+                provider: "gemini",
+                toolCallsExecuted: traces,
+                ...(suggestedRoute
+                  ? { suggestedAction: { label: "Continue in IBE", route: suggestedRoute } }
+                  : {}),
+              };
+            }
+            break;
           }
+
+          contents.push({ role: "model", parts });
+          const fnResponses = [];
+          for (const part of fnCalls) {
+            const call = part.functionCall!;
+            const exec = await this.executeStructuredTool(
+              call.name,
+              call.args ?? {},
+              params.session,
+            );
+            traces.push(exec.trace);
+            if (!suggestedRoute && exec.suggestedRoute) suggestedRoute = exec.suggestedRoute;
+            fnResponses.push({
+              functionResponse: { name: call.name, response: exec.result },
+            });
+          }
+          contents.push({ role: "function", parts: fnResponses });
         }
       } catch {
-        // Gracefully degrade to grounded tool synthesis below
+        // Degrade safely to local structured tool dispatch below
       }
     }
 
-    const fallbackIntro =
+    const planned = this.inferFallbackTools(cleanMsg);
+    const summaries: string[] = [];
+    for (const p of planned) {
+      const exec = await this.executeStructuredTool(p.name, p.args, params.session);
+      traces.push(exec.trace);
+      if (!suggestedRoute && exec.suggestedRoute) suggestedRoute = exec.suggestedRoute;
+      summaries.push(`${exec.trace.name}: ${JSON.stringify(exec.result)}`);
+    }
+
+    const activePromos = Object.entries(cmsState.dynamicPromos)
+      .filter(([, pr]) => pr.active)
+      .map(([c, pr]) => `${c} (-${pr.discountPct}%)`)
+      .join(", ");
+
+    const reply =
       params.lang === "ar"
-        ? "مرحباً! إليك المعلومات الموثّقة من نظام الطيران العُماني:"
-        : "Marhaba! Based on live Oman Air BFF records:";
+        ? `تم التحقق من أدوات النظام (${traces.map((t) => t.name).join("، ")}): ${summaries.join(" | ")}. العروض النشطة: ${activePromos}.`
+        : `Verified via BFF structured tools (${traces.map((t) => t.name).join(", ")}): ${summaries.join(" | ")}. Active promos: ${activePromos}.`;
+
+    const actionLabels: Record<NonNullable<typeof suggestedRoute>, string> = {
+      "/": "Search Flights",
+      "/manage": "Open Manage My Booking",
+      "/checkin": "Go to Online Check-In",
+      "/status": "View Flight Status",
+      "/sindbad": "View Sindbad Portal",
+    };
+
     return {
-      reply: `${fallbackIntro} ${contextFacts.join(" ")}`,
+      reply,
       provider: "tool-fallback",
       toolCallsExecuted: traces,
-      suggestedAction,
+      ...(suggestedRoute
+        ? { suggestedAction: { label: actionLabels[suggestedRoute], route: suggestedRoute } }
+        : {}),
     };
   }
 }

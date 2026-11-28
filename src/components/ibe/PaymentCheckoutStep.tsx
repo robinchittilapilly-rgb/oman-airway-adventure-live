@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Clock, CreditCard, Lock, ShieldCheck, Smartphone, Sparkles, Wallet } from "lucide-react";
+import { toast } from "sonner";
 import { formatMoney } from "../../data/omanAirRoutes";
 import { useIBE } from "../../context/IBEContext";
+import { bffClient } from "../../lib/bff-client";
 import { Button } from "../ui/button";
 
 export type PaymentMethodId = "card" | "lpm" | "wallet" | "bnpl" | "miles_cash";
@@ -28,6 +30,7 @@ interface PaymentCheckoutStepProps {
     holdHours?: 24 | 48;
     paymentMethod: PaymentMethodId;
     paymentLabel: string;
+    paymentToken?: string;
     milesUsed: number;
     travelBankUsedOMR: number;
     finalCashOMR: number;
@@ -46,7 +49,7 @@ export function PaymentCheckoutStep({
   reviewSummary,
   onConfirmPay,
 }: PaymentCheckoutStepProps) {
-  const { currency, sindbadMiles, sindbadSignedIn, travelBankOMR, lang } = useIBE();
+  const { currency, sindbadMiles, sindbadSignedIn, travelBankOMR, lang, bffConnected } = useIBE();
   const [method, setMethod] = useState<PaymentMethodId>("card");
   const [lpmChoice, setLpmChoice] = useState<"OmanNet" | "Mada" | "KNET">("OmanNet");
   const [bnplChoice, setBnplChoice] = useState<"Tabby" | "Tamara" | "Tasheel">("Tabby");
@@ -55,6 +58,16 @@ export function PaymentCheckoutStep({
   const [holdMode, setHoldMode] = useState(false);
   const [holdHours, setHoldHours] = useState<24 | 48>(24);
   const [cardChoice, setCardChoice] = useState("Visa Infinite •••• 4821");
+  const [cardholderName, setCardholderName] = useState("TARIQ ALBALUSHI");
+  const [cardExpiry, setCardExpiry] = useState("09/29");
+  const [threeDsChallenge, setThreeDsChallenge] = useState<{
+    threeDsTransId: string;
+    paymentToken: string;
+    otpHint: string;
+    label: string;
+  } | null>(null);
+  const [threeDsOtp, setThreeDsOtp] = useState("123456");
+  const [busyAuth, setBusyAuth] = useState(false);
 
   const maxMilesOMR = sindbadSignedIn
     ? Math.min(totalOMR * 0.5, Math.floor(sindbadMiles / 400))
@@ -70,7 +83,7 @@ export function PaymentCheckoutStep({
       : 15
     : Math.max(0, +(afterMiles - bankOffsetOMR).toFixed(3));
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     if (holdMode) {
       onConfirmPay({
         mode: "hold",
@@ -85,7 +98,7 @@ export function PaymentCheckoutStep({
     }
     const label =
       method === "card"
-        ? `${cardChoice} (Simulated Checkout)`
+        ? `${cardChoice} (${bffConnected ? "Hosted PSP Token" : "Simulated Checkout"})`
         : method === "lpm"
           ? `${lpmChoice} Regional Debit (Demo)`
           : method === "wallet"
@@ -93,6 +106,59 @@ export function PaymentCheckoutStep({
             : method === "bnpl"
               ? `${bnplChoice} 4× Installments (Demo)`
               : `Sindbad Miles (${milesToBurn.toLocaleString()} mi) + Card (Demo)`;
+
+    if (bffConnected && method === "card" && finalCashOMR > 0) {
+      setBusyAuth(true);
+      try {
+        const last4 = cardChoice.match(/(\d{4})/)?.[1] ?? "4821";
+        const scheme: "Visa" | "Mastercard" | "AMEX" | "Diners" | "JCB" = cardChoice.includes(
+          "Mastercard",
+        )
+          ? "Mastercard"
+          : cardChoice.includes("AMEX")
+            ? "AMEX"
+            : cardChoice.includes("Diners")
+              ? "Diners"
+              : cardChoice.includes("JCB")
+                ? "JCB"
+                : "Visa";
+        const tokRes = await bffClient.tokenizeCard(
+          {
+            cardLast4: last4,
+            expiry: cardExpiry,
+            cardholderName,
+            scheme,
+            amountOMR: finalCashOMR,
+          },
+          lang,
+        );
+        if (tokRes.token.threeDsRequired && !tokRes.token.threeDsVerified) {
+          const chRes = await bffClient.initiateThreeDs2(tokRes.token.paymentToken, lang);
+          setThreeDsChallenge({
+            threeDsTransId: chRes.challenge.threeDsTransId,
+            paymentToken: chRes.challenge.paymentToken,
+            otpHint: chRes.challenge.otpHint,
+            label,
+          });
+          setBusyAuth(false);
+          return;
+        }
+        onConfirmPay({
+          mode: "pay",
+          paymentMethod: method,
+          paymentLabel: tokRes.token.maskedPan,
+          paymentToken: tokRes.token.paymentToken,
+          milesUsed: milesToBurn,
+          travelBankUsedOMR: bankOffsetOMR,
+          finalCashOMR,
+        });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Card tokenization failed.");
+      } finally {
+        setBusyAuth(false);
+      }
+      return;
+    }
 
     onConfirmPay({
       mode: "pay",
@@ -102,6 +168,30 @@ export function PaymentCheckoutStep({
       travelBankUsedOMR: bankOffsetOMR,
       finalCashOMR,
     });
+  };
+
+  const handleVerifyThreeDs = async () => {
+    if (!threeDsChallenge) return;
+    setBusyAuth(true);
+    try {
+      await bffClient.verifyThreeDs2(threeDsChallenge.threeDsTransId, threeDsOtp, lang);
+      const token = threeDsChallenge.paymentToken;
+      const label = threeDsChallenge.label;
+      setThreeDsChallenge(null);
+      onConfirmPay({
+        mode: "pay",
+        paymentMethod: method,
+        paymentLabel: label,
+        paymentToken: token,
+        milesUsed: milesToBurn,
+        travelBankUsedOMR: bankOffsetOMR,
+        finalCashOMR,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "3DS2 verification failed.");
+    } finally {
+      setBusyAuth(false);
+    }
   };
 
   return (
@@ -269,10 +359,62 @@ export function PaymentCheckoutStep({
                       <option value="JCB Ultimate •••• 5529">JCB Ultimate •••• 5529 (Demo)</option>
                     </select>
                   </div>
+                  <div>
+                    <label
+                      htmlFor="cardholder-name-in"
+                      className="mb-1 block text-xs font-semibold"
+                    >
+                      Cardholder Name
+                    </label>
+                    <input
+                      id="cardholder-name-in"
+                      value={cardholderName}
+                      onChange={(e) => setCardholderName(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="card-expiry-in" className="mb-1 block text-xs font-semibold">
+                      Expiry (MM/YY)
+                    </label>
+                    <input
+                      id="card-expiry-in"
+                      value={cardExpiry}
+                      onChange={(e) => setCardExpiry(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-input bg-background px-3 text-xs"
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground sm:col-span-2">
-                    Simulated prototype checkout — no real card charge, 3DS2 challenge, or live
-                    gateway call is performed.
+                    {bffConnected
+                      ? "PCI-DSS SAQ-A Hosted Tokenization & EMV 3DS2 ACS challenge via BFF sandbox."
+                      : "Simulated prototype checkout — no real card charge is performed."}
                   </p>
+                </div>
+              )}
+
+              {threeDsChallenge && (
+                <div className="mt-4 rounded-xl border border-primary/40 bg-primary/5 p-3.5 text-xs space-y-2">
+                  <p className="font-bold text-primary">EMV 3DS2 ACS Challenge Required (FR-97)</p>
+                  <p className="text-muted-foreground">
+                    Enter your 6-digit bank OTP to authorize payment (Sandbox OTP:{" "}
+                    <strong>{threeDsChallenge.otpHint}</strong>).
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={threeDsOtp}
+                      onChange={(e) => setThreeDsOtp(e.target.value)}
+                      aria-label="3DS2 OTP code"
+                      className="h-9 w-36 rounded-lg border border-input bg-background px-2.5 font-mono text-xs"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={busyAuth}
+                      onClick={() => void handleVerifyThreeDs()}
+                    >
+                      Verify 3DS2 &amp; Issue Ticket
+                    </Button>
+                  </div>
                 </div>
               )}
 
@@ -459,8 +601,9 @@ export function PaymentCheckoutStep({
           <Button
             type="button"
             size="lg"
+            disabled={busyAuth}
             className="mt-5 h-12 w-full gap-2 rounded-xl font-display text-sm font-bold"
-            onClick={handleComplete}
+            onClick={() => void handleComplete()}
           >
             <Lock className="h-4 w-4" />
             {holdMode

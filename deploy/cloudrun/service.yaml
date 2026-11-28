@@ -1,0 +1,65 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: oman-air-ibe-bff
+  labels:
+    cloud.googleapis.com/location: me-central2
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "20"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 60
+      containers:
+        - image: gcr.io/PROJECT_ID/oman-air-ibe:latest
+          ports:
+            - containerPort: 8787
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: BFF_PORT
+              value: "8787"
+            - name: BFF_TRUST_PROXY
+              value: "true"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oman-air-ibe-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oman-air-ibe-secrets
+                  key: redis-url
+            - name: BFF_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oman-air-ibe-secrets
+                  key: bff-session-secret
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oman-air-ibe-secrets
+                  key: gemini-api-key
+            - name: BFF_ADMIN_TOTP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oman-air-ibe-secrets
+                  key: admin-totp-secret
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8787
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8787
+            periodSeconds: 15
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi

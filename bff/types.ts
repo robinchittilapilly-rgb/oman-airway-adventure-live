@@ -17,6 +17,7 @@ export interface BffSessionUser {
   role: "guest" | "member" | "admin";
   demoModeEnabled?: boolean | undefined;
   authProvider?: "demo" | "oidc" | "anonymous" | undefined;
+  mfaVerified?: boolean | undefined;
   memberId?: string | undefined;
   memberName?: string | undefined;
   sindbadNo?: string | undefined;
@@ -26,6 +27,14 @@ export interface BffSessionUser {
   travelBankOMR: number;
   pos: PointOfSale;
   experimentVariant: "control" | "bundle_highlight_v2";
+}
+
+export interface BffEdgeContextResponse {
+  posCountry: string;
+  currency: CurrencyCode;
+  lang: AppLang;
+  suggestedLocale: string;
+  source: "geoip-header" | "accept-language" | "default";
 }
 
 export interface BffSearchRequest {
@@ -185,6 +194,7 @@ export interface BffCheckoutRequest {
   holdHours?: 24 | 48 | undefined;
   paymentMethod: "card" | "lpm" | "wallet" | "bnpl" | "miles_cash";
   paymentDetailLabel: string;
+  paymentToken?: string | undefined;
   useMilesSplit?: boolean | undefined;
   useTravelBank?: boolean | undefined;
 }
@@ -251,6 +261,8 @@ export interface BffCmsState {
   heroSubtitleAr: string;
   featureFlags: BffFeatureFlags;
   dynamicPromos: Record<string, { discountPct: number; label: string; active: boolean }>;
+  ancillaryMediaMap?:
+    Record<string, { badge: string; imageAlt: string; iconKey: string }> | undefined;
   articles: BffCmsArticle[];
 }
 

@@ -601,6 +601,7 @@ function Index() {
     holdHours?: 24 | 48;
     paymentMethod: PaymentMethodId;
     paymentLabel: string;
+    paymentToken?: string;
     milesUsed: number;
     travelBankUsedOMR: number;
     finalCashOMR: number;
@@ -636,6 +637,7 @@ function Index() {
             holdHours: details.holdHours,
             paymentMethod: details.paymentMethod,
             paymentDetailLabel: details.paymentLabel,
+            ...(details.paymentToken ? { paymentToken: details.paymentToken } : {}),
             useMilesSplit: details.milesUsed > 0,
             useTravelBank: details.travelBankUsedOMR > 0,
           },

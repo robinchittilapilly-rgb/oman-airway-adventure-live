@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Oman Air | Emergency Information & Dark Site Portal</title>
+    <link rel="icon" type="image/png" href="./oman-air-favicon.png" />
+    <style>
+      :root { --teal: #0b3c49; --crimson: #9e1b32; --bg: #f8fafc; --card: #ffffff; --ink: #0f172a; --muted: #475569; --line: #cbd5e1; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--ink); line-height: 1.5; }
+      header { background: var(--teal); color: #fff; border-bottom: 4px solid var(--crimson); padding: 14px 20px; }
+      .wrap { max-width: 880px; margin: 0 auto; }
+      .bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+      .brand { font-weight: 700; font-size: 1.05rem; letter-spacing: 0.04em; }
+      .sub { font-size: 0.8rem; opacity: 0.88; }
+      .actions { display: flex; gap: 8px; }
+      button, a.btn { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.4); border-radius: 6px; padding: 6px 12px; font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: none; }
+      button:hover, a.btn:hover { background: rgba(255,255,255,0.12); }
+      main { padding: 24px 20px 40px; display: grid; gap: 18px; }
+      section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+      .alert { border-color: #fda4af; background: #fff1f2; }
+      h1, h2 { margin: 0 0 8px; font-size: 1.15rem; }
+      .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+      .box { background: #f1f5f9; border-radius: 8px; padding: 12px 14px; font-size: 0.9rem; }
+      input { height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; font-size: 0.92rem; min-width: 180px; }
+      .status-ok { color: #15803d; font-weight: 700; }
+      .status-warn { color: var(--crimson); font-weight: 700; }
+      footer { text-align: center; font-size: 0.78rem; color: var(--muted); padding: 0 20px 28px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="wrap bar">
+        <div>
+          <div class="brand" id="hdr-title">OMAN AIR · CRISIS INFORMATION CENTRE</div>
+          <div class="sub" id="hdr-sub">Static CDN Dark Site Fallback (FR-31 / FR-32 · Zero-Origin Dependency)</div>
+        </div>
+        <div class="actions">
+          <button type="button" id="lang-btn">العربية</button>
+          <a class="btn" href="./" id="home-link">Return to Booking Engine</a>
+        </div>
+      </div>
+    </header>
+    <main class="wrap">
+      <section class="alert">
+        <h1 id="adv-head">Operational Advisory</h1>
+        <p id="adv-body">All Oman Air operations remain under active monitoring. Passengers on disrupted flights (including WY 603) qualify for fee-waived rebooking or full Travel Bank credit.</p>
+      </section>
+      <section>
+        <h2 id="flt-head">Flight Status Check (Offline Snapshot)</h2>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+          <input id="flt-in" value="WY 603" aria-label="Flight number" placeholder="WY 603" />
+          <div id="flt-out" class="box" style="flex:1;min-width:240px;"></div>
+        </div>
+      </section>
+      <section>
+        <h2 id="dir-head">24/7 Emergency Assistance Desks</h2>
+        <div class="grid">
+          <div class="box"><strong>Oman (Muscat Hub)</strong><br />+968 2453 1111</div>
+          <div class="box"><strong>UAE &amp; GCC Toll-Free</strong><br />800 6626 247</div>
+          <div class="box"><strong>UK &amp; Europe Desk</strong><br />+44 20 7101 0700</div>
+        </div>
+      </section>
+    </main>
+    <footer>Oman Air Digital Retailing Engine · Edge CDN Dark Site Static Template</footer>
+    <script>
+      (function(){
+        var flights = {
+          "WY603": { r: "MCT -> DXB", t: "10:15 - 11:25", s: "DISRUPTED — Free Rebooking Active", w: true },
+          "WY101": { r: "MCT -> LHR", t: "14:20 - 18:25", s: "ON TIME", w: false },
+          "WY817": { r: "MCT -> BKK", t: "08:55 - 18:05", s: "ON TIME", w: false }
+        };
+        var ar = false;
+        var inp = document.getElementById("flt-in");
+        var out = document.getElementById("flt-out");
+        function renderFlt(){
+          var key = (inp.value || "").replace(/\s+/g, "").toUpperCase();
+          var hit = flights[key];
+          out.innerHTML = hit
+            ? "<strong>" + key + "</strong> (" + hit.r + " · " + hit.t + ") — <span class='" + (hit.w ? "status-warn" : "status-ok") + "'>" + hit.s + "</span>"
+            : (ar ? "أدخل رقم رحلة مثل WY 603 أو WY 101." : "Enter WY 603, WY 101, or WY 817 for snapshot status.");
+        }
+        inp.addEventListener("input", renderFlt);
+        document.getElementById("lang-btn").addEventListener("click", function(){
+          ar = !ar;
+          document.documentElement.dir = ar ? "rtl" : "ltr";
+          document.getElementById("lang-btn").textContent = ar ? "English" : "العربية";
+          document.getElementById("hdr-title").textContent = ar ? "الطيران العماني · مركز معلومات الأزمات" : "OMAN AIR · CRISIS INFORMATION CENTRE";
+          document.getElementById("adv-head").textContent = ar ? "تنبيه تشغيلي عاجل" : "Operational Advisory";
+          document.getElementById("adv-body").textContent = ar ? "تخضع جميع الرحلات للمراقبة المستمرة. يحق لركاب الرحلات المتأثرة مثل WY 603 إعادة الحجز مجاناً." : "All Oman Air operations remain under active monitoring. Passengers on disrupted flights (including WY 603) qualify for fee-waived rebooking or full Travel Bank credit.";
+          document.getElementById("home-link").textContent = ar ? "العودة إلى الحجز" : "Return to Booking Engine";
+          renderFlt();
+        });
+        renderFlt();
+      })();
+    </script>
+  </body>
+</html>

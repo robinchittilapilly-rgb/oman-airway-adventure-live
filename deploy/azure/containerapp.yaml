@@ -1,0 +1,51 @@
+apiVersion: 2024-03-01
+location: uaenorth
+name: oman-air-ibe-bff-app
+properties:
+  environmentId: /subscriptions/SUBSCRIPTION_ID/resourceGroups/oman-air-ibe-rg/providers/Microsoft.App/managedEnvironments/oman-air-cae
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8787
+      transport: auto
+    secrets:
+      - name: database-url
+        value: "<KEYVAULT_OR_SECRET>"
+      - name: redis-url
+        value: "<KEYVAULT_OR_SECRET>"
+      - name: bff-session-secret
+        value: "<KEYVAULT_OR_SECRET>"
+      - name: gemini-api-key
+        value: "<KEYVAULT_OR_SECRET>"
+      - name: admin-totp-secret
+        value: "<KEYVAULT_OR_SECRET>"
+  template:
+    containers:
+      - name: oman-air-ibe-bff
+        image: omanaircr.azurecr.io/oman-air-ibe:latest
+        env:
+          - name: NODE_ENV
+            value: production
+          - name: BFF_PORT
+            value: "8787"
+          - name: DATABASE_URL
+            secretRef: database-url
+          - name: REDIS_URL
+            secretRef: redis-url
+          - name: BFF_SESSION_SECRET
+            secretRef: bff-session-secret
+          - name: GEMINI_API_KEY
+            secretRef: gemini-api-key
+          - name: BFF_ADMIN_TOTP_SECRET
+            secretRef: admin-totp-secret
+        resources:
+          cpu: 1.0
+          memory: 2Gi
+    scale:
+      minReplicas: 2
+      maxReplicas: 20
+      rules:
+        - name: http-concurrency
+          http:
+            metadata:
+              concurrentRequests: "50"

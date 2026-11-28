@@ -235,11 +235,27 @@ function CheckInPage() {
     );
   };
 
-  const handleDownloadWalletPass = (
+  const handleDownloadWalletPass = async (
     p: NonNullable<typeof booking>["passengers"][number],
+    paxIdx: number,
     bcbp: string,
   ) => {
     if (!booking) return;
+    if (bffConnected) {
+      try {
+        const blob = await bffClient.downloadApplePkpass(booking.rloc, paxIdx);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `OmanAir-${booking.rloc}-${p.firstName}.pkpass`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success(`Downloaded signed Apple Wallet .pkpass for ${p.firstName}.`);
+        return;
+      } catch {
+        // fallback cleanly to offline pass summary
+      }
+    }
     const content = [
       "OMAN AIR DIGITAL BOARDING PASS (DEMO PREVIEW)",
       `Passenger: ${p.firstName} ${p.lastName}`,
@@ -257,6 +273,21 @@ function CheckInPage() {
     a.click();
     URL.revokeObjectURL(url);
     toast.success(`Downloaded boarding pass summary for ${p.firstName} (Demo Wallet Pass).`);
+  };
+
+  const handleGoogleWalletPass = async (paxIdx: number) => {
+    if (!booking) return;
+    if (!bffConnected) {
+      toast.info("Connect BFF server to issue signed Google Wallet Save JWT.");
+      return;
+    }
+    try {
+      const res = await bffClient.getGoogleWalletPass(booking.rloc, paxIdx, lang);
+      await navigator.clipboard?.writeText(res.jwt).catch(() => undefined);
+      toast.success(`Google Wallet Save JWT issued & copied (${res.jwt.slice(0, 18)}...).`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Google Wallet JWT generation failed.");
+    }
   };
 
   return (
@@ -562,10 +593,20 @@ function CheckInPage() {
                           size="sm"
                           variant="secondary"
                           className="flex-1 gap-1.5 text-xs"
-                          onClick={() => handleDownloadWalletPass(p, bcbp)}
+                          onClick={() => void handleDownloadWalletPass(p, idx, bcbp)}
                         >
-                          <Smartphone className="h-3.5 w-3.5" /> {copy.addToWallet}
+                          <Smartphone className="h-3.5 w-3.5" /> Apple .pkpass
                         </Button>
+                        {bffConnected && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="flex-1 gap-1.5 text-xs"
+                            onClick={() => void handleGoogleWalletPass(idx)}
+                          >
+                            Google Wallet
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="outline"

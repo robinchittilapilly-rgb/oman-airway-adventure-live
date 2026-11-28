@@ -6,6 +6,7 @@ import type {
   BffCheckoutResponse,
   BffCmsArticle,
   BffCmsState,
+  BffEdgeContextResponse,
   BffErrorPayload,
   BffFeatureFlags,
   BffHandoffPayload,
@@ -201,6 +202,16 @@ export const bffClient = {
     return bffFetch<{
       cms: BffCmsState;
       auditLogs: BffAuditEntry[];
+      mfaVerified?: boolean;
+      traces?: {
+        traceId: string;
+        spanId: string;
+        method: string;
+        path: string;
+        statusCode: number;
+        durationMs: number;
+        startedAt: string;
+      }[];
       infra: {
         storeBackend: string;
         cacheBackend: string;
@@ -220,6 +231,16 @@ export const bffClient = {
       heroSubtitleEn?: string;
       featureFlags?: Partial<BffFeatureFlags>;
       upsertPromo?: { code: string; discountPct: number; label: string; active: boolean };
+      upsertArticle?: {
+        slug: string;
+        category: "policy" | "baggage" | "advisory" | "destination" | "sindbad";
+        titleEn: string;
+        titleAr: string;
+        bodyEn: string;
+        bodyAr: string;
+        routeLink: string;
+        published: boolean;
+      };
     },
     lang: "en" | "ar" = "en",
   ) {
@@ -492,5 +513,105 @@ export const bffClient = {
       cached: boolean;
       items: ((typeof OMAN_AIR_20_ROUTES)[number] & { gate: string; status: string })[];
     }>(`/api/bff/v1/status/flights?q=${encodeURIComponent(q)}`, { lang });
+  },
+  getEdgeContext(lang: "en" | "ar" = "en") {
+    return bffFetch<BffEdgeContextResponse>("/api/bff/v1/edge/context", { lang });
+  },
+  setupAdminMfa(lang: "en" | "ar" = "en") {
+    return bffFetch<{
+      secretBase32: string;
+      otpauthUri: string;
+      mfaVerified: boolean;
+      sandboxCurrentCode?: string;
+    }>("/api/bff/v1/admin/mfa/setup", { method: "POST", lang });
+  },
+  verifyAdminMfa(code: string, lang: "en" | "ar" = "en") {
+    return bffFetch<{ mfaVerified: boolean; user: BffSessionUser }>(
+      "/api/bff/v1/admin/mfa/verify",
+      {
+        method: "POST",
+        body: JSON.stringify({ code }),
+        lang,
+      },
+    );
+  },
+  tokenizeCard(
+    payload: {
+      cardLast4: string;
+      expiry: string;
+      cardholderName: string;
+      scheme: "Visa" | "Mastercard" | "AMEX" | "Diners" | "JCB";
+      amountOMR: number;
+    },
+    lang: "en" | "ar" = "en",
+  ) {
+    return bffFetch<{
+      token: {
+        paymentToken: string;
+        maskedPan: string;
+        accertifyRiskScore: number;
+        threeDsRequired: boolean;
+        threeDsVerified: boolean;
+      };
+    }>("/api/bff/v1/payments/tokenize", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      lang,
+    });
+  },
+  initiateThreeDs2(paymentToken: string, lang: "en" | "ar" = "en") {
+    return bffFetch<{
+      challenge: {
+        threeDsTransId: string;
+        paymentToken: string;
+        acsUrl: string;
+        otpHint: string;
+        verified: boolean;
+      };
+    }>("/api/bff/v1/payments/3ds2/challenge", {
+      method: "POST",
+      body: JSON.stringify({ paymentToken }),
+      lang,
+    });
+  },
+  verifyThreeDs2(threeDsTransId: string, otpCode: string, lang: "en" | "ar" = "en") {
+    return bffFetch<{
+      challenge: {
+        threeDsTransId: string;
+        paymentToken: string;
+        verified: boolean;
+        cavv?: string;
+        eci?: string;
+      };
+    }>("/api/bff/v1/payments/3ds2/verify", {
+      method: "POST",
+      body: JSON.stringify({ threeDsTransId, otpCode }),
+      lang,
+    });
+  },
+  async downloadApplePkpass(rloc: string, paxIdx: number): Promise<Blob> {
+    const base = getConfiguredBffUrl();
+    if (!base) throw new BffClientError("ERR_OFFLINE", "BFF not connected.", 503);
+    const tok = readStoredToken();
+    const res = await fetch(
+      `${base}/api/bff/v1/checkin/${encodeURIComponent(rloc)}/wallet/apple/${paxIdx}`,
+      {
+        credentials: "include",
+        headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+      },
+    );
+    if (!res.ok)
+      throw new BffClientError(
+        "ERR_INTERNAL",
+        `Wallet download failed (${res.status})`,
+        res.status,
+      );
+    return res.blob();
+  },
+  getGoogleWalletPass(rloc: string, paxIdx: number, lang: "en" | "ar" = "en") {
+    return bffFetch<{ jwt: string; saveUrl: string; bcbp: string }>(
+      `/api/bff/v1/checkin/${encodeURIComponent(rloc)}/wallet/google/${paxIdx}`,
+      { lang },
+    );
   },
 };

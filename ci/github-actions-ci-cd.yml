@@ -1,0 +1,51 @@
+# Oman Air Digital Retailing Engine — CI/CD Pipeline (GitHub Actions)
+# Note: Copy this file to .github/workflows/ci-cd.yml after running `gh auth refresh -s workflow`
+# so your GitHub token carries the `workflow` OAuth scope required to push workflow files.
+name: Oman Air IBE CI & Cloud CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Lint, Typecheck, Unit Tests & E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npx tsc -p bff/tsconfig.json --noEmit
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run bff:build
+      - run: npm run build
+
+  docker-build-and-deploy:
+    name: Build Container Image & Deploy
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Production Container
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: oman-air-ibe-bff:${{ github.sha }}
+      - name: Deploy to Google Cloud Run (when GCP_SA_KEY configured)
+        if: secrets.GCP_SA_KEY != ''
+        run: echo "gcloud run services replace deploy/cloudrun/service.yaml"
+      - name: Deploy to Azure Container Apps (when AZURE_CREDENTIALS configured)
+        if: secrets.AZURE_CREDENTIALS != ''
+        run: echo "az containerapp update --name oman-air-ibe-bff-app --yaml deploy/azure/containerapp.yaml"

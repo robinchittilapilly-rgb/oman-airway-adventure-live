@@ -43,14 +43,24 @@ export function DarkSiteView() {
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setDarkSiteMode(false)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-teal-deep-foreground/30 px-3 py-1.5 text-xs font-semibold hover:bg-teal-deep-foreground/10"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            {copy.exit}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={`${import.meta.env.BASE_URL}dark-site.html`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-teal-deep-foreground/30 px-3 py-1.5 text-xs font-semibold hover:bg-teal-deep-foreground/10"
+            >
+              Static CDN Fallback
+            </a>
+            <button
+              type="button"
+              onClick={() => setDarkSiteMode(false)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-teal-deep-foreground/30 px-3 py-1.5 text-xs font-semibold hover:bg-teal-deep-foreground/10"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              {copy.exit}
+            </button>
+          </div>
         </div>
       </header>
 

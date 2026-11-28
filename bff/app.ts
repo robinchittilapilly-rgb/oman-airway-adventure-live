@@ -22,6 +22,7 @@ import {
   validatePassengerMix,
 } from "../src/lib/ibe-rules";
 import { MockSindbadLmsAdapter } from "./adapters/lmsAdapter";
+import { PaymentGatewaySandbox } from "./adapters/paymentGateway";
 import { MockSabrePssAdapter } from "./adapters/pssAdapter";
 import { ThirdPartyIntegrationHub } from "./adapters/thirdPartyHub";
 import {
@@ -36,6 +37,11 @@ import {
 import { BffAppError, translateBffError } from "./middleware/errorTranslator";
 import { idempotencyMiddleware } from "./middleware/idempotency";
 import { SlidingWindowRateLimiter, rateLimitMiddleware } from "./middleware/rateLimiter";
+import {
+  getRecentTraces,
+  renderPrometheusMetrics,
+  telemetryMiddleware,
+} from "./middleware/telemetry";
 import { buildBrandedFareQuotes, computeServerCartPricing } from "./rules/retailingEngine";
 import {
   addBookingAncillarySchema,
@@ -51,6 +57,7 @@ import {
   householdAddSchema,
   irropsActionSchema,
   loginSchema,
+  mfaVerifySchema,
   oidcAuthorizeSchema,
   oidcCallbackSchema,
   partnerSsoSchema,
@@ -61,12 +68,20 @@ import {
   searchSchema,
   servicePnrSchema,
   settleHoldSchema,
+  threeDsChallengeSchema,
+  threeDsVerifySchema,
   tierSwitchSchema,
+  tokenizeCardSchema,
 } from "./schemas";
 import { SuhailAiService } from "./services/aiAssistantService";
 import { recordAudit } from "./services/auditService";
 import { BffCmsService } from "./services/cmsService";
+import { generateTotpCode, getAdminTotpSecret, verifyAdminTotp } from "./services/mfaService";
 import { OidcPkceService } from "./services/oidcService";
+import {
+  generateApplePkpassBuffer,
+  generateGoogleWalletSaveJwt,
+} from "./services/walletPassService";
 import { createCacheStoreFromEnv, type CacheStore } from "./stores/cacheStore";
 import { createSessionStoreFromEnv } from "./stores/index";
 import type { SessionAndCartStore } from "./stores/sessionStore";
@@ -107,13 +122,15 @@ export function createBffApp(deps: BffDependencies = {}) {
   const pss = new MockSabrePssAdapter(store);
   const lms = new MockSindbadLmsAdapter(store);
   const thirdParty = new ThirdPartyIntegrationHub();
+  const gateway = new PaymentGatewaySandbox(cache);
   const cms = new BffCmsService(store);
   const oidc = new OidcPkceService(cache, store);
-  const suhailAi = new SuhailAiService(pss, cms);
+  const suhailAi = new SuhailAiService(pss, cms, store);
   const searchLimiter = deps.searchRateLimiter ?? new SlidingWindowRateLimiter(30, 60_000);
   const idempotency = idempotencyMiddleware(cache);
 
   const app = new Hono();
+  app.use("*", telemetryMiddleware);
 
   const allowedOrigins = (
     process.env["CORS_ORIGIN"] ??
@@ -139,6 +156,8 @@ export function createBffApp(deps: BffDependencies = {}) {
         "Accept-Language",
         "X-Session-Id",
         "X-OmanAir-POS",
+        "CF-IPCountry",
+        "X-Country-Code",
         "Idempotency-Key",
       ],
       exposeHeaders: [
@@ -146,6 +165,7 @@ export function createBffApp(deps: BffDependencies = {}) {
         "X-OmanAir-Experiment",
         "X-RateLimit-Remaining",
         "X-Idempotent-Replay",
+        "X-Trace-Id",
         "Retry-After",
       ],
     }),
@@ -186,6 +206,74 @@ export function createBffApp(deps: BffDependencies = {}) {
       timestamp: new Date().toISOString(),
     }),
   );
+
+  app.get("/metrics", (c) => {
+    c.header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+    return c.body(renderPrometheusMetrics());
+  });
+
+  // --- Edge GeoIP & Accept-Language Router (FR-30) ---
+  app.get("/api/bff/v1/edge/context", (c) => {
+    const rawCountry = (
+      c.req.header("cf-ipcountry") ??
+      c.req.header("x-country-code") ??
+      c.req.header("x-vercel-ip-country") ??
+      c.req.header("x-omanair-pos") ??
+      ""
+    )
+      .trim()
+      .toUpperCase();
+    const acceptLang = (c.req.header("accept-language") ?? "").toLowerCase();
+    const isAr = acceptLang.startsWith("ar");
+    const countryMap: Record<
+      string,
+      { currency: "OMR" | "USD" | "EUR" | "GBP" | "AED" | "SAR"; locale: string }
+    > = {
+      OM: { currency: "OMR", locale: isAr ? "ar-OM" : "en-OM" },
+      AE: { currency: "AED", locale: isAr ? "ar-AE" : "en-AE" },
+      SA: { currency: "SAR", locale: isAr ? "ar-SA" : "en-SA" },
+      GB: { currency: "GBP", locale: "en-GB" },
+      FR: { currency: "EUR", locale: "fr-FR" },
+      DE: { currency: "EUR", locale: "de-DE" },
+      NL: { currency: "EUR", locale: "nl-NL" },
+      US: { currency: "USD", locale: "en-US" },
+    };
+    const hit = rawCountry ? countryMap[rawCountry] : undefined;
+    if (hit) {
+      return c.json({
+        posCountry: rawCountry,
+        currency: hit.currency,
+        lang: isAr ? "ar" : "en",
+        suggestedLocale: hit.locale,
+        source: "geoip-header" as const,
+      });
+    }
+    if (acceptLang.includes("en-gb")) {
+      return c.json({
+        posCountry: "GB",
+        currency: "GBP" as const,
+        lang: "en" as const,
+        suggestedLocale: "en-GB",
+        source: "accept-language" as const,
+      });
+    }
+    if (isAr) {
+      return c.json({
+        posCountry: "OM",
+        currency: "OMR" as const,
+        lang: "ar" as const,
+        suggestedLocale: "ar-OM",
+        source: "accept-language" as const,
+      });
+    }
+    return c.json({
+      posCountry: "OM",
+      currency: "OMR" as const,
+      lang: "en" as const,
+      suggestedLocale: "en-OM",
+      source: "default" as const,
+    });
+  });
 
   // --- Auth & OIDC + PKCE Session Management (FR-23, FR-45, FR-47) ---
   app.get("/api/bff/v1/auth/session", async (c) => {
@@ -346,6 +434,8 @@ export function createBffApp(deps: BffDependencies = {}) {
     return c.json({
       cms: cmsState,
       auditLogs,
+      traces: getRecentTraces(25),
+      mfaVerified: Boolean(session.user.mfaVerified),
       infra: {
         storeBackend: store.backendName,
         cacheBackend: cache.backendName,
@@ -355,6 +445,44 @@ export function createBffApp(deps: BffDependencies = {}) {
     });
   });
 
+  app.post("/api/bff/v1/admin/mfa/setup", async (c) => {
+    const session = await resolveOrCreateSession(store, c);
+    if (session.user.role !== "admin") {
+      throw new BffAppError("ERR_FORBIDDEN", 403, "Admin role required to enroll MFA.");
+    }
+    const secretBase32 = getAdminTotpSecret();
+    const label = encodeURIComponent(`OmanAir:${session.user.memberName ?? "Admin"}`);
+    const otpauthUri = `otpauth://totp/${label}?secret=${secretBase32}&issuer=OmanAirIBE`;
+    return c.json({
+      secretBase32,
+      otpauthUri,
+      mfaVerified: Boolean(session.user.mfaVerified),
+      ...(isDemoAuthEnabled() ? { sandboxCurrentCode: generateTotpCode(secretBase32) } : {}),
+    });
+  });
+
+  app.post("/api/bff/v1/admin/mfa/verify", async (c) => {
+    const session = await resolveOrCreateSession(store, c);
+    if (session.user.role !== "admin") {
+      throw new BffAppError("ERR_FORBIDDEN", 403, "Admin role required for MFA verification.");
+    }
+    const body = mfaVerifySchema.parse(await c.req.json());
+    if (!verifyAdminTotp(body.code)) {
+      throw new BffAppError("ERR_FORBIDDEN", 403, "Invalid 6-digit TOTP authenticator code.");
+    }
+    session.user.mfaVerified = true;
+    await store.saveSession(session);
+    await recordAudit(store, {
+      eventType: "ADMIN_MFA_VERIFIED",
+      actorSessionId: session.sessionId,
+      actorMemberId: session.user.memberId,
+      resourceId: "admin-mfa",
+      payload: { method: "totp-rfc6238" },
+    });
+    attachSessionHeadersAndCookie(c, session);
+    return c.json({ mfaVerified: true, user: session.user });
+  });
+
   app.put("/api/bff/v1/admin/cms", async (c) => {
     const session = await resolveOrCreateSession(store, c);
     if (session.user.role !== "admin") {
@@ -362,6 +490,13 @@ export function createBffApp(deps: BffDependencies = {}) {
         "ERR_FORBIDDEN",
         403,
         "Admin role required to publish CMS or rules updates.",
+      );
+    }
+    if (session.user.mfaVerified !== true) {
+      throw new BffAppError(
+        "ERR_FORBIDDEN",
+        403,
+        "Admin TOTP MFA verification is required before publishing CMS or dark-site updates.",
       );
     }
     const patch = cmsAdminUpdateSchema.parse(await c.req.json());
@@ -627,6 +762,34 @@ export function createBffApp(deps: BffDependencies = {}) {
     return c.json({ cart });
   });
 
+  app.post("/api/bff/v1/payments/tokenize", async (c) => {
+    await resolveOrCreateSession(store, c);
+    const body = tokenizeCardSchema.parse(await c.req.json());
+    const token = await gateway.tokenizeCard(body);
+    return c.json({ token });
+  });
+
+  app.post("/api/bff/v1/payments/3ds2/challenge", async (c) => {
+    await resolveOrCreateSession(store, c);
+    const body = threeDsChallengeSchema.parse(await c.req.json());
+    const challenge = await gateway.initiateThreeDs2(body.paymentToken);
+    return c.json({ challenge });
+  });
+
+  app.post("/api/bff/v1/payments/3ds2/verify", async (c) => {
+    const session = await resolveOrCreateSession(store, c);
+    const body = threeDsVerifySchema.parse(await c.req.json());
+    const challenge = await gateway.verifyThreeDs2Challenge(body.threeDsTransId, body.otpCode);
+    await recordAudit(store, {
+      eventType: "PAYMENT_3DS2_VERIFIED",
+      actorSessionId: session.sessionId,
+      actorMemberId: session.user.memberId,
+      resourceId: challenge.threeDsTransId,
+      payload: { paymentToken: challenge.paymentToken, eci: challenge.eci },
+    });
+    return c.json({ challenge });
+  });
+
   app.post("/api/bff/v1/cart/:cartId/checkout", idempotency, async (c) => {
     const session = await resolveOrCreateSession(store, c);
     const cart = await store.getCart(c.req.param("cartId") ?? "");
@@ -724,6 +887,10 @@ export function createBffApp(deps: BffDependencies = {}) {
       const afterMiles = Math.max(0, totalOMR - milesOffsetOMR);
       travelBankUsedOMR = body.useTravelBank ? Math.min(afterMiles, session.user.travelBankOMR) : 0;
       finalCashOMR = Math.max(0, +(afterMiles - travelBankUsedOMR).toFixed(3));
+    }
+
+    if (body.paymentToken) {
+      await gateway.assertTokenAuthorized(body.paymentToken);
     }
 
     const authRes = thirdParty.authorizePaymentIntent({
@@ -941,6 +1108,10 @@ export function createBffApp(deps: BffDependencies = {}) {
       ? Math.min(afterMiles, session.user.travelBankOMR)
       : 0;
     const finalCashOMR = Math.max(0, +(afterMiles - travelBankUsedOMR).toFixed(3));
+
+    if (body.paymentToken) {
+      await gateway.assertTokenAuthorized(body.paymentToken);
+    }
 
     const authRes = thirdParty.authorizePaymentIntent({
       amountOMR: finalCashOMR,
@@ -1344,6 +1515,47 @@ export function createBffApp(deps: BffDependencies = {}) {
       !booking.ssrs.some((s) => s.code === "UMNR") &&
       (session.user.tier === "Gold" || FARE_BRANDS[booking.fareBrand].cabin !== "economy");
     return c.json({ rloc: booking.rloc, autoCheckInEligible: eligible });
+  });
+
+  app.get("/api/bff/v1/checkin/:rloc/wallet/apple/:paxIdx", async (c) => {
+    const session = await resolveOrCreateSession(store, c);
+    const booking = await store.getBooking(c.req.param("rloc") ?? "");
+    if (!booking) throw new BffAppError("ERR_404_PNR", 404);
+    assertBookingAccess(session, booking);
+
+    const paxIdx = Math.max(0, Number.parseInt(c.req.param("paxIdx") ?? "0", 10) || 0);
+    const pkpassBuf = generateApplePkpassBuffer(booking, paxIdx);
+    await recordAudit(store, {
+      eventType: "WALLET_PASS_ISSUED",
+      actorSessionId: session.sessionId,
+      actorMemberId: session.user.memberId,
+      resourceId: booking.rloc,
+      payload: { provider: "apple-pkpass", paxIdx },
+    });
+    c.header("Content-Type", "application/vnd.apple.pkpass");
+    c.header(
+      "Content-Disposition",
+      `attachment; filename="OmanAir-${booking.rloc}-Pax${paxIdx + 1}.pkpass"`,
+    );
+    return c.body(new Uint8Array(pkpassBuf));
+  });
+
+  app.get("/api/bff/v1/checkin/:rloc/wallet/google/:paxIdx", async (c) => {
+    const session = await resolveOrCreateSession(store, c);
+    const booking = await store.getBooking(c.req.param("rloc") ?? "");
+    if (!booking) throw new BffAppError("ERR_404_PNR", 404);
+    assertBookingAccess(session, booking);
+
+    const paxIdx = Math.max(0, Number.parseInt(c.req.param("paxIdx") ?? "0", 10) || 0);
+    const walletRes = generateGoogleWalletSaveJwt(booking, paxIdx);
+    await recordAudit(store, {
+      eventType: "WALLET_PASS_ISSUED",
+      actorSessionId: session.sessionId,
+      actorMemberId: session.user.memberId,
+      resourceId: booking.rloc,
+      payload: { provider: "google-wallet", paxIdx },
+    });
+    return c.json(walletRes);
   });
 
   app.post("/api/bff/v1/handoff/token", async (c) => {

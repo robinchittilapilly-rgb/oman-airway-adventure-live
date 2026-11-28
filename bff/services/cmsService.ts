@@ -100,6 +100,22 @@ export function createDefaultCmsState(): BffCmsState {
       darkSiteEmergencyBanner: false,
     },
     dynamicPromos,
+    ancillaryMediaMap: {
+      BAG_10: {
+        badge: "Most Popular",
+        imageAlt: "10 kg Checked Baggage Allowance",
+        iconKey: "luggage",
+      },
+      BAG_20: { badge: "Best Value", imageAlt: "20 kg Extra Checked Baggage", iconKey: "luggage" },
+      LOUNGE_MCT: {
+        badge: "Signature",
+        imageAlt: "Majan Lounge Muscat Access",
+        iconKey: "sparkles",
+      },
+      FAST_TRACK: { badge: "Priority", imageAlt: "Airport Fast Track Security", iconKey: "zap" },
+      CHAUFFEUR: { badge: "Luxury", imageAlt: "Muscat Chauffeur Transfer", iconKey: "car" },
+      WIFI_PASS: { badge: "Connected", imageAlt: "High-Speed Inflight Wi-Fi", iconKey: "wifi" },
+    },
     articles: DEFAULT_ARTICLES,
   };
 }
@@ -129,6 +145,18 @@ export class BffCmsService {
       featureFlags?: { [K in keyof BffFeatureFlags]?: BffFeatureFlags[K] | undefined } | undefined;
       upsertPromo?:
         { code: string; discountPct: number; label: string; active: boolean } | undefined;
+      upsertArticle?:
+        | {
+            slug: string;
+            category: "policy" | "baggage" | "advisory" | "destination" | "sindbad";
+            titleEn: string;
+            titleAr: string;
+            bodyEn: string;
+            bodyAr: string;
+            routeLink: string;
+            published: boolean;
+          }
+        | undefined;
     },
     actorName: string,
   ): Promise<BffCmsState> {
@@ -141,6 +169,24 @@ export class BffCmsService {
         label: patch.upsertPromo.label,
         active: patch.upsertPromo.active,
       };
+    }
+    const nextArticles = [...cur.articles];
+    if (patch.upsertArticle) {
+      const slug = patch.upsertArticle.slug.trim().toLowerCase();
+      const idx = nextArticles.findIndex((a) => a.slug === slug);
+      const art: BffCmsArticle = {
+        id: idx >= 0 ? nextArticles[idx]!.id : `art-${slug.slice(0, 24)}`,
+        slug,
+        category: patch.upsertArticle.category,
+        titleEn: patch.upsertArticle.titleEn,
+        titleAr: patch.upsertArticle.titleAr,
+        bodyEn: patch.upsertArticle.bodyEn,
+        bodyAr: patch.upsertArticle.bodyAr,
+        routeLink: patch.upsertArticle.routeLink,
+        published: patch.upsertArticle.published,
+      };
+      if (idx >= 0) nextArticles[idx] = art;
+      else nextArticles.unshift(art);
     }
     const mergedFlags: BffFeatureFlags = { ...cur.featureFlags };
     if (patch.featureFlags) {
@@ -165,6 +211,7 @@ export class BffCmsService {
       heroSubtitleAr: patch.heroSubtitleAr ?? cur.heroSubtitleAr,
       featureFlags: mergedFlags,
       dynamicPromos: nextPromos,
+      articles: nextArticles,
     };
     await this.store.saveCmsState(next);
     return next;
